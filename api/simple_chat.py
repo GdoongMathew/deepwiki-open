@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, TYPE_CHECKING, Callable
+from typing import List, Optional, Callable
 from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException
@@ -20,9 +20,6 @@ from api.prompts import (
 
 # Configure logging
 from api.logging_config import setup_logging
-
-if TYPE_CHECKING:
-    from ollama import ChatResponse
 
 setup_logging()
 logger = logging.getLogger(__name__)
