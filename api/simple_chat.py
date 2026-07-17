@@ -68,6 +68,14 @@ class ChatCompletionRequest(BaseModel):
     included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
     included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
 
+
+def _is_token_limit_error(exc: Exception) -> bool:
+    error_message = str(exc).lower()
+    return any(
+        k in error_message for k in ("maximum context length", "token limit", "too many tokens")
+    )
+
+
 @app.post("/chat/completions/stream")
 async def chat_completions_stream(request: ChatCompletionRequest):
     """Stream a chat completion response directly using Google Generative AI"""
@@ -336,12 +344,6 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             prompt += "<note>Answering without retrieval augmentation due to input size constraints.</note>\n\n"
             prompt += f"<query>\n{query}\n</query>\n\nAssistant: "
             return prompt
-
-        def _is_token_limit_error(exc: Exception) -> bool:
-            error_message = str(exc).lower()
-            return any(
-                k in error_message for k in ("maximum context length", "token limit", "too many tokens")
-            )
 
         async def stream_and_fallback(
                 streamer: ChatStreamer,
