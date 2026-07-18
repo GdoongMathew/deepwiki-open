@@ -11,12 +11,14 @@ from api.config import (
     OPENAI_API_KEY,
     AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY,
+    LITELLM_API_KEY,
 )
 
 if TYPE_CHECKING:
     from ollama import ChatResponse
     from openai.types.chat import ChatCompletionChunk
     from openai import AsyncStream
+    from api.openai_client import OpenAIClient
 
 MODEL_CFG = dict[str, str | int | float]
 
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 class ChatStreamer(ABC):
     _registry: dict[str, type["ChatStreamer"]] = {}
     provider: str
+    error_hint: str | None = None
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
@@ -71,7 +74,7 @@ class OllamaChatStreamer(ChatStreamer):
 
     async def respond_stream(self, prompt: str) -> AsyncIterator[str]:
         api_kwargs = self.client.convert_inputs_to_api_kwargs(
-            input=prompt + " /no_think",    # todo I think this could be added into model kwargs?
+            input=prompt + " /no_think",  # todo I think this could be added into model kwargs?
             model_kwargs=self.model_kwargs,
             model_type=ModelType.LLM,
         )
@@ -94,6 +97,10 @@ class OllamaChatStreamer(ChatStreamer):
 
 class OpenRouterChatStreamer(ChatStreamer):
     provider = "openrouter"
+    error_hint = (
+        "Please check that you have set the OPENROUTER_API_KEY "
+        "environment variable with a valid API key."
+    )
 
     def __init__(self, *, model: str, model_config: MODEL_CFG):
         if not OPENROUTER_API_KEY:
@@ -123,16 +130,12 @@ class OpenRouterChatStreamer(ChatStreamer):
             yield chunk
 
 
-class OpenAIChatStreamer(ChatStreamer):
-    provider = "openai"
+class _OpenAICompatStreamer(ChatStreamer):
+    client: "OpenAIClient"
+    model_kwargs: dict
 
     def __init__(self, *, model: str, model_config: MODEL_CFG):
-        if not OPENAI_API_KEY:
-            logger.warning("OPENAI_API_KEY not configured, but continuing with request")
-            # We'll let the OpenAIClient handle this and return an error message
-        from api.openai_client import OpenAIClient
-
-        self.client = OpenAIClient()
+        self.client = self._build_client()
         self.model_kwargs = {
             "model": model,
             "stream": True,
@@ -142,6 +145,12 @@ class OpenAIChatStreamer(ChatStreamer):
         if "top_p" in model_config:
             self.model_kwargs["top_p"] = model_config["top_p"]
 
+    @abstractmethod
+    def _build_client(self) -> "OpenAIClient":
+        raise NotImplementedError(
+            f"{type(self).__name__} must return an `OpenAIClient` instance"
+        )
+
     async def respond_stream(self, prompt: str) -> AsyncIterator[str]:
         api_kwargs = self.client.convert_inputs_to_api_kwargs(
             input=prompt,
@@ -162,42 +171,62 @@ class OpenAIChatStreamer(ChatStreamer):
                 yield chunk.choices[0].delta.content
 
 
-class AzureChatStreamer(ChatStreamer):
-    provider = "azure"
+class OpenAIChatStreamer(_OpenAICompatStreamer):
+    provider = "openai"
+    error_hint = (
+        "Please check that you have set the OPENAI_API_KEY "
+        "environment variable with a valid API key."
+    )
 
     def __init__(self, *, model: str, model_config: MODEL_CFG):
+        if not OPENAI_API_KEY:
+            logger.warning("OPENAI_API_KEY not configured, but continuing with request")
+
+        super().__init__(model=model, model_config=model_config)
+
+    def _build_client(self):
+        from api.openai_client import OpenAIClient
+        return OpenAIClient()
+
+
+class AzureChatStreamer(_OpenAICompatStreamer):
+    provider = "azure"
+    error_hint = (
+        "Please check that you have set the AZURE_OPENAI_API_KEY, "
+        "AZURE_OPENAI_ENDPOINT, and AZURE_OPENAI_VERSION "
+        "environment variables with valid values."
+    )
+
+    def _build_client(self):
         from api.azureai_client import AzureAIClient
+        return AzureAIClient()
 
-        self.client = AzureAIClient()
-        self.model_kwargs = {
-            "model": model,
-            "stream": True,
-            "temperature": model_config["temperature"],
-            "top_p": model_config["top_p"]
-        }
 
-    async def respond_stream(self, prompt: str) -> AsyncIterator[str]:
-        api_kwargs = self.client.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=self.model_kwargs,
-            model_type=ModelType.LLM
-        )
-        response: "AsyncStream[ChatCompletionChunk]" = await self.client.acall(
-            api_kwargs=api_kwargs,
-            model_type=ModelType.LLM,
-        )
+class LiteLLMChatStreamer(_OpenAICompatStreamer):
+    provider = "litellm"
+    error_hint = (
+        "Please check that you have set the LITELLM_API_KEY "
+        "environment variable with a valid API key."
+    )
 
-        async for chunk in response:
-            if (
-                    chunk.choices and
-                    chunk.choices[0].delta is not None and
-                    chunk.choices[0].delta.content is not None
-            ):
-                yield chunk.choices[0].delta.content
+    def __init__(self, *, model: str, model_config: MODEL_CFG):
+        if not LITELLM_API_KEY:
+            logger.warning("LITELLM_API_KEY not configured, but continuing with request")
+            # We'll let the OpenAIClient handle this and return an error message
+
+        super().__init__(model=model, model_config=model_config)
+
+    def _build_client(self):
+        from api.litellm_client import LiteLLMClient
+        return LiteLLMClient()
 
 
 class BedrockChatStreamer(ChatStreamer):
     provider = "bedrock"
+    error_hint = (
+        "Please check that you have set the AWS_ACCESS_KEY_ID "
+        "and AWS_SECRET_ACCESS_KEY environment variables with valid credentials."
+    )
 
     def __init__(self, *, model: str, model_config: MODEL_CFG):
         if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
@@ -206,11 +235,14 @@ class BedrockChatStreamer(ChatStreamer):
         from api.bedrock_client import BedrockClient
 
         self.client = BedrockClient()
-        self.model_kwargs = {
-            "model": model,
-            "temperature": model_config["temperature"],
-            "top_p": model_config["top_p"]
-        }
+        self.model_kwargs = {"model": model}
+
+        for key in (
+                "temperature",
+                "top_p",
+        ):
+            if key in model_config:
+                self.model_kwargs[key] = model_config[key]
 
     async def respond_stream(self, prompt: str) -> AsyncIterator[str]:
         api_kwargs = self.client.convert_inputs_to_api_kwargs(
@@ -229,6 +261,10 @@ class BedrockChatStreamer(ChatStreamer):
 
 class DashScopeChatStreamer(ChatStreamer):
     provider = "dashscope"
+    error_hint = (
+        "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
+        "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+    )
 
     def __init__(self, *, model: str, model_config: MODEL_CFG):
         from api.dashscope_client import DashscopeClient
