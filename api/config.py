@@ -7,15 +7,17 @@ from typing import List, Union, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-from api.openai_client import OpenAIClient
-from api.litellm_client import LiteLLMClient
-from api.openrouter_client import OpenRouterClient
-from api.bedrock_client import BedrockClient
-from api.google_embedder_client import GoogleEmbedderClient
-from api.azureai_client import AzureAIClient
-from api.dashscope_client import DashscopeClient
-from api.ollama_client import OllamaClient
-from adalflow import GoogleGenAIClient
+from api.clients import (
+    LiteLLMClient,
+    OpenRouterClient,
+    BedrockClient,
+    GoogleGenAIClient,
+    GoogleEmbedderClient,
+    AzureAIClient,
+    DashscopeClient,
+    OpenAIClient,
+    OllamaClient,
+)
 
 # Get API keys from environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
