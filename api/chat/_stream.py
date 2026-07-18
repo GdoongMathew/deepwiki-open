@@ -302,9 +302,9 @@ class GoogleGenerativeChatStreamer(ChatStreamer):
         self.client = genai.GenerativeModel(
             model_name=model,
             generation_config=GenerationConfig(
-                temperature=model_config["temperature"],
-                top_p=model_config["top_p"],
-                top_k=model_config["top_k"],
+                temperature=model_config.get("temperature"),
+                top_p=model_config.get("top_p"),
+                top_k=model_config.get("top_k"),
             )
         )
 
