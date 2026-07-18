@@ -1,33 +1,18 @@
 import logging
-import os
 from collections.abc import AsyncIterator, Callable
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from urllib.parse import unquote
 from functools import partial
 
-import google.generativeai as genai
-from adalflow.components.model_client.ollama_client import OllamaClient
-from adalflow.core.types import ModelType
-from fastapi import WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from api.chat import ChatStreamer, prompt_builder, is_token_limit_error
 from api.config import (
     get_model_config,
     configs,
-    OPENROUTER_API_KEY,
-    OPENAI_API_KEY,
-    LITELLM_API_KEY,
-    AWS_ACCESS_KEY_ID,
-    AWS_SECRET_ACCESS_KEY,
 )
 from api.data_pipeline import count_tokens, get_file_content
-from api.bedrock_client import BedrockClient
-from api.openai_client import OpenAIClient
-from api.litellm_client import LiteLLMClient
-from api.openrouter_client import OpenRouterClient
-from api.azureai_client import AzureAIClient
-from api.dashscope_client import DashscopeClient
 from api.rag import RAG
 
 # Configure logging
