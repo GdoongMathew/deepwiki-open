@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from ollama import ChatResponse
     from openai.types.chat import ChatCompletionChunk
     from openai import AsyncStream
-    from api.openai_client import OpenAIClient
+    from api.clients import OpenAIClient
 
 MODEL_CFG = dict[str, str | int | float]
 
@@ -106,7 +106,7 @@ class OpenRouterChatStreamer(ChatStreamer):
         if not OPENROUTER_API_KEY:
             logger.warning("OPENROUTER_API_KEY not configured, but continuing with request")
             # We'll let the OpenRouterClient handle this and return a friendly error message
-        from api.openrouter_client import OpenRouterClient
+        from api.clients import OpenRouterClient
 
         self.client = OpenRouterClient()
         self.model_kwargs = {
@@ -185,7 +185,7 @@ class OpenAIChatStreamer(_OpenAICompatStreamer):
         super().__init__(model=model, model_config=model_config)
 
     def _build_client(self):
-        from api.openai_client import OpenAIClient
+        from api.clients import OpenAIClient
         return OpenAIClient()
 
 
@@ -198,7 +198,7 @@ class AzureChatStreamer(_OpenAICompatStreamer):
     )
 
     def _build_client(self):
-        from api.azureai_client import AzureAIClient
+        from adalflow.components.model_client import AzureAIClient
         return AzureAIClient()
 
 
@@ -217,7 +217,7 @@ class LiteLLMChatStreamer(_OpenAICompatStreamer):
         super().__init__(model=model, model_config=model_config)
 
     def _build_client(self):
-        from api.litellm_client import LiteLLMClient
+        from api.clients import LiteLLMClient
         return LiteLLMClient()
 
 
@@ -232,7 +232,7 @@ class BedrockChatStreamer(ChatStreamer):
         if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
             logger.warning("AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not configured, but continuing with request")
             # We'll let the BedrockClient handle this and return an error message
-        from api.bedrock_client import BedrockClient
+        from api.clients import BedrockClient
 
         self.client = BedrockClient()
         self.model_kwargs = {"model": model}
@@ -267,7 +267,7 @@ class DashScopeChatStreamer(ChatStreamer):
     )
 
     def __init__(self, *, model: str, model_config: MODEL_CFG):
-        from api.dashscope_client import DashscopeClient
+        from api.clients import DashscopeClient
 
         self.client = DashscopeClient()
         self.model_kwargs = {
