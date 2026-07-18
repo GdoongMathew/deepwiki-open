@@ -307,26 +307,23 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         def prompt() -> str:
             # Create the prompt with context
             prompt = f"/no_think {system_prompt}\n\n"
-
             if conversation_history:
                 prompt += f"<conversation_history>\n{conversation_history}</conversation_history>\n\n"
 
             # Check if filePath is provided and fetch file content if it exists
-            if file_content:
+            if request.filePath and file_content:
                 # Add file content to the prompt after conversation history
                 prompt += f"<currentFileContent path=\"{request.filePath}\">\n{file_content}\n</currentFileContent>\n\n"
 
             # Only include context if it's not empty
-            CONTEXT_START = "<START_OF_CONTEXT>"
-            CONTEXT_END = "<END_OF_CONTEXT>"
             if context_text.strip():
-                prompt += f"{CONTEXT_START}\n{context_text}\n{CONTEXT_END}\n\n"
+                context_prompt = f"<START_OF_CONTEXT>\n{context_text}\n<END_OF_CONTEXT>\n\n"
             else:
                 # Add a note that we're skipping RAG due to size constraints or because it's the isolated API
                 logger.info("No context available from RAG")
-                prompt += "<note>Answering without retrieval augmentation.</note>\n\n"
+                context_prompt = "<note>Answering without retrieval augmentation.</note>\n\n"
 
-            prompt += f"<query>\n{query}\n</query>\n\nAssistant: "
+            prompt += f"{context_prompt}<query>\n{query}\n</query>\n\nAssistant: "
             return prompt
 
         def simplified_prompt() -> str:
@@ -338,8 +335,10 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             if request.filePath and file_content:
                 prompt += f"<currentFileContent path=\"{request.filePath}\">\n{file_content}\n</currentFileContent>\n\n"
 
-            prompt += "<note>Answering without retrieval augmentation due to input size constraints.</note>\n\n"
-            prompt += f"<query>\n{query}\n</query>\n\nAssistant: "
+            prompt += (
+                f"<note>Answering without retrieval augmentation due to input size constraints.</note>\n\n"
+                f"<query>\n{query}\n</query>\n\nAssistant: "
+            )
             return prompt
 
         async def stream_and_fallback(
@@ -385,6 +384,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         error_msg = f"Error in streaming chat completion: {str(e_handler)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
 
 @app.get("/")
 async def root():
