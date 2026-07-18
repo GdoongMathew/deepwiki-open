@@ -1,6 +1,6 @@
 import pytest
-from api.chat import (
-    ChatStreamer,
+from api.chat import ChatStreamer
+from api.chat._stream import (
     OllamaChatStreamer,
     OpenRouterChatStreamer,
     OpenAIChatStreamer,
@@ -8,6 +8,7 @@ from api.chat import (
     BedrockChatStreamer,
     DashScopeChatStreamer,
     GoogleGenerativeChatStreamer,
+    LiteLLMChatStreamer,
 )
 
 @pytest.mark.parametrize("provider, expected", [
@@ -18,6 +19,7 @@ from api.chat import (
     ("bedrock", BedrockChatStreamer),
     ("dashscope", DashScopeChatStreamer),
     ("google", GoogleGenerativeChatStreamer),
+    ("litellm", LiteLLMChatStreamer),
 ])
 def test_every_provider_is_registered(provider, expected):
     assert ChatStreamer._registry[provider] is expected
@@ -30,6 +32,7 @@ def test_every_provider_is_registered(provider, expected):
     ("bedrock", BedrockChatStreamer),
     ("dashscope", DashScopeChatStreamer),
     ("google", GoogleGenerativeChatStreamer),
+    ("litellm", LiteLLMChatStreamer),
 ])
 def test_create_returns_correct_subclass(monkeypatch, provider, expected):
     monkeypatch.setattr(expected, "__init__", lambda self, **kw: None)
