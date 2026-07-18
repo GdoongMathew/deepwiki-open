@@ -1,13 +1,14 @@
 import logging
 from typing import List, Optional, Callable
 from urllib.parse import unquote
+from functools import partial
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.chat import ChatStreamer
+from api.chat import ChatStreamer, , prompt_builder, is_token_limit_error
 from api.config import get_model_config, configs
 from api.data_pipeline import count_tokens, get_file_content
 from api.rag import RAG, MAX_INPUT_TOKENS
@@ -64,13 +65,6 @@ class ChatCompletionRequest(BaseModel):
     excluded_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to exclude from processing")
     included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
     included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
-
-
-def _is_token_limit_error(exc: Exception) -> bool:
-    error_message = str(exc).lower()
-    return any(
-        k in error_message for k in ("maximum context length", "token limit", "too many tokens")
-    )
 
 
 @app.post("/chat/completions/stream")
@@ -304,43 +298,6 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             if not isinstance(turn_id, int) and hasattr(turn, 'user_query') and hasattr(turn, 'assistant_response'):
                 conversation_history += f"<turn>\n<user>{turn.user_query.query_str}</user>\n<assistant>{turn.assistant_response.response_str}</assistant>\n</turn>\n"
 
-        def prompt() -> str:
-            # Create the prompt with context
-            prompt = f"/no_think {system_prompt}\n\n"
-            if conversation_history:
-                prompt += f"<conversation_history>\n{conversation_history}</conversation_history>\n\n"
-
-            # Check if filePath is provided and fetch file content if it exists
-            if request.filePath and file_content:
-                # Add file content to the prompt after conversation history
-                prompt += f"<currentFileContent path=\"{request.filePath}\">\n{file_content}\n</currentFileContent>\n\n"
-
-            # Only include context if it's not empty
-            if context_text.strip():
-                context_prompt = f"<START_OF_CONTEXT>\n{context_text}\n<END_OF_CONTEXT>\n\n"
-            else:
-                # Add a note that we're skipping RAG due to size constraints or because it's the isolated API
-                logger.info("No context available from RAG")
-                context_prompt = "<note>Answering without retrieval augmentation.</note>\n\n"
-
-            prompt += f"{context_prompt}<query>\n{query}\n</query>\n\nAssistant: "
-            return prompt
-
-        def simplified_prompt() -> str:
-            prompt = f"/no_think {system_prompt}\n\n"
-            if conversation_history:
-                prompt += f"<conversation_history>\n{conversation_history}</conversation_history>\n\n"
-
-            # Include file content in the fallback prompt if it was retrieved
-            if request.filePath and file_content:
-                prompt += f"<currentFileContent path=\"{request.filePath}\">\n{file_content}\n</currentFileContent>\n\n"
-
-            prompt += (
-                f"<note>Answering without retrieval augmentation due to input size constraints.</note>\n\n"
-                f"<query>\n{query}\n</query>\n\nAssistant: "
-            )
-            return prompt
-
         async def stream_and_fallback(
                 streamer: ChatStreamer,
                 prompt_func: Callable[[], str],
@@ -350,19 +307,23 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                 async for chunk in streamer.respond_stream(prompt_func()):
                     yield chunk
             except Exception as e:
-                if _is_token_limit_error(e):
+                if is_token_limit_error(e):
                     logger.warning("Token limit exceeded, retrying without context")
                     try:
                         async for chunk in streamer.respond_stream(simplified_prompt_func()):
                             yield chunk
                     except Exception as e2:
-                        logger.error(f"Error in fallback streaming response: {str(e2)}")
+                        logger.error("Error in fallback streaming response: %s", str(e2))
                         yield (
                             f"\nI apologize, but your request is too large for me to process. "
                             f"Please try a shorter query or break it into smaller parts."
                         )
                 else:
-                    yield f"\nError: {str(e)}"
+                    error_str = f"Error with {streamer.provider} API: {e}"
+                    logger.error(error_str, exc_info=True)
+                    if streamer.error_hint:
+                        error_str += f"\n\n{streamer.error_hint}"
+                    yield "\n" + error_str
 
         model_config = get_model_config(request.provider, request.model)["model_kwargs"]
         chat_streamer = ChatStreamer.create(
@@ -370,12 +331,31 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             model=request.model,
             model_config=model_config,
         )
+        prompt_kwargs = dict(
+            system_prompt=system_prompt,
+            query=query,
+            conversation_history=conversation_history,
+            file_path=request.filePath,
+            file_content=file_content,
+            context=context_text,
+        )
+
+        prompt_func = partial(
+            prompt_builder,
+            **prompt_kwargs,
+            simplify=False,
+        )
+        simplified_prompt_func = partial(
+            prompt_builder,
+            **prompt_kwargs,
+            simplify=True,
+        )
 
         # Return streaming response
         return StreamingResponse(stream_and_fallback(
             streamer=chat_streamer,
-            prompt_func=prompt,
-            simplified_prompt_func=simplified_prompt,
+            prompt_func=prompt_func,
+            simplified_prompt_func=simplified_prompt_func,
         ), media_type="text/event-stream")
 
     except HTTPException:
