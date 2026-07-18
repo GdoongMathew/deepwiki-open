@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from api.chat import ChatStreamer
 from api.config import get_model_config, configs
 from api.data_pipeline import count_tokens, get_file_content
-from api.rag import RAG
+from api.rag import RAG, MAX_INPUT_TOKENS
 from api.prompts import (
     DEEP_RESEARCH_FIRST_ITERATION_PROMPT,
     DEEP_RESEARCH_FINAL_ITERATION_PROMPT,
@@ -84,8 +84,8 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             if hasattr(last_message, 'content') and last_message.content:
                 tokens = count_tokens(last_message.content, request.provider == "ollama")
                 logger.info(f"Request size: {tokens} tokens")
-                if tokens > 8000:
-                    logger.warning(f"Request exceeds recommended token limit ({tokens} > 7500)")
+                if tokens > MAX_INPUT_TOKENS:
+                    logger.warning(f"Request exceeds recommended token limit ({tokens} > {MAX_INPUT_TOKENS})")
                     input_too_large = True
 
         # Create a new RAG instance for this request
