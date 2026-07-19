@@ -270,7 +270,6 @@ async def handle_websocket_chat(websocket: WebSocket):
                     repo_type=repo_type,
                     repo_url=repo_url,
                     repo_name=repo_name,
-                    research_iteration=research_iteration,
                     language_name=language_name
                 )
             else:
