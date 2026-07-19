@@ -1,7 +1,5 @@
 import logging
 
-import httpx
-import requests
 import os
 
 # Configure logging
@@ -26,6 +24,7 @@ def check_ollama_model_exists(model_name: str, ollama_host: str = None) -> bool:
         bool: True if model exists, False otherwise
     """
     import ollama
+    import httpx
     if ollama_host is None:
         ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     try:
