@@ -1,4 +1,6 @@
 import logging
+
+import httpx
 import requests
 import os
 
@@ -40,7 +42,7 @@ def check_ollama_model_exists(model_name: str, ollama_host: str = None) -> bool:
                 model_name,
                 str([model.model for model in ret.models]))
         return is_available
-    except ConnectionError as e:
+    except (httpx.ConnectTimeout, ConnectionError):
         logger.warning(f"Could not connect to Ollama to check models: {e}")
         return False
     except Exception as e:
