@@ -131,7 +131,7 @@ IMPORTANT:You MUST respond in {language_name} language.
 - Your response MUST build on previous research iterations - do not repeat information already covered
 - Identify gaps or areas that need further exploration related to this specific topic
 - Focus on one specific aspect that needs deeper investigation in this iteration
-- Start your response with "## Research Update {{research_iteration}}"
+- Start your response with "## Research Update {research_iteration}"
 - Clearly explain what you're investigating in this iteration
 - Provide new insights that weren't covered in previous iterations
 - If this is iteration 3, prepare for a final conclusion in the next iteration
