@@ -119,21 +119,21 @@ async def handle_websocket_chat(websocket: WebSocket):
                     )
 
         # Check if this is a Deep Research request
-        is_deep_research = False
+        is_deep_research = last_message.mode == "deep_research"
         research_iteration = 1
-
-        # Process messages to detect Deep Research requests
-        for msg in request.messages:
-            if hasattr(msg, 'content') and msg.content and "[DEEP RESEARCH]" in msg.content:
-                is_deep_research = True
-                # Only remove the tag from the last message
-                if msg == request.messages[-1]:
-                    # Remove the Deep Research tag
-                    msg.content = msg.content.replace("[DEEP RESEARCH]", "").strip()
 
         # Count research iterations if this is a Deep Research request
         if is_deep_research:
-            research_iteration = sum(1 for msg in request.messages if msg.role == 'assistant') + 1
+            # only count the assistant turns within the current deep research streak, so that mode switched
+            # before wouldn't inflate the current research iteration
+            current_streak = 0
+            for msg in reversed(request.messages):
+                if msg.role == "user" and msg.mode != "deep_research":
+                    break
+                if msg.role == "assistant":
+                    current_streak += 1
+
+            research_iteration = current_streak + 1
             logger.info(f"Deep Research request detected - iteration {research_iteration}")
 
             # Check if this is a continuation request
@@ -142,7 +142,7 @@ async def handle_websocket_chat(websocket: WebSocket):
                 original_topic = None
                 for msg in request.messages:
                     if msg.role == "user" and "continue" not in msg.content.lower():
-                        original_topic = msg.content.replace("[DEEP RESEARCH]", "").strip()
+                        original_topic = msg.content.strip()
                         logger.info(f"Found original research topic: {original_topic}")
                         break
 

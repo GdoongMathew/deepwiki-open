@@ -17,6 +17,7 @@ const getWebSocketUrl = () => {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  mode?: 'normal' | 'deep_research';
 }
 
 export interface ChatCompletionRequest {

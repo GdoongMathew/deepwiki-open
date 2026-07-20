@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 class ChatMessage(BaseModel):
     role: str  # 'user' or 'assistant'
     content: str
+    mode: Literal["normal", "deep_research"] = Field(default="normal")
 
 class ChatCompletionRequest(BaseModel):
     """

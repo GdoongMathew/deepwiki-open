@@ -24,6 +24,7 @@ interface Provider {
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  mode?: 'normal' | 'deep_research';
 }
 
 interface ResearchStage {
@@ -299,7 +300,8 @@ const Ask: React.FC<AskProps> = ({
         },
         {
           role: 'user',
-          content: '[DEEP RESEARCH] Continue the research'
+          content: 'Continue the research',
+          mode: 'deep_research'
         }
       ];
 
@@ -317,7 +319,11 @@ const Ask: React.FC<AskProps> = ({
       const requestBody: ChatCompletionRequest = {
         repo_url: getRepoUrl(repoInfo),
         type: repoInfo.type,
-        messages: newHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
+        messages: newHistory.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          mode: msg.mode ?? 'normal',
+        })),
         provider: selectedProvider,
         model: isCustomSelectedModel ? customSelectedModel : selectedModel,
         language: language
@@ -548,7 +554,8 @@ const Ask: React.FC<AskProps> = ({
       // Create initial message
       const initialMessage: Message = {
         role: 'user',
-        content: deepResearch ? `[DEEP RESEARCH] ${question}` : question
+        content: question,
+        mode: deepResearch ? 'deep_research' : 'normal'
       };
 
       // Set initial conversation history
@@ -559,7 +566,11 @@ const Ask: React.FC<AskProps> = ({
       const requestBody: ChatCompletionRequest = {
         repo_url: getRepoUrl(repoInfo),
         type: repoInfo.type,
-        messages: newHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
+        messages: newHistory.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          mode: msg.mode ?? 'normal'
+        })),
         provider: selectedProvider,
         model: isCustomSelectedModel ? customSelectedModel : selectedModel,
         language: language
