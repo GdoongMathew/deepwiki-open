@@ -66,19 +66,19 @@ class ChatCompletionRequest(BaseModel):
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
     excluded_dirs: List[str] = Field(
         default_factory=list,
-        description="Comma-separated list of directories to exclude from processing",
+        description="List or newline-separated string of directories to exclude from processing",
     )
     excluded_files: List[str] = Field(
         default_factory=list,
-        description="Comma-separated list of file patterns to exclude from processing",
+        description="List or newline-separated string of file patterns to exclude from processing",
     )
     included_dirs: List[str] = Field(
         default_factory=list,
-        description="Comma-separated list of directories to include exclusively",
+        description="List or newline-separated string of directories to include exclusively",
     )
     included_files: List[str] = Field(
         default_factory=list,
-        description="Comma-separated list of file patterns to include exclusively",
+        description="List or newline-separated string of file patterns to include exclusively",
     )
 
     @field_validator(
