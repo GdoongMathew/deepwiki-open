@@ -91,7 +91,7 @@ class ChatCompletionRequest(BaseModel):
     @classmethod
     def validate_path(cls, value: list[str] | str) -> list[str]:
         if isinstance(value, str):
-            value = [unquote(path) for path in value.strip().split("\n")]
+            value = [unquote(path) for path in value.strip().split("\n") if path]
         return value
 
 
