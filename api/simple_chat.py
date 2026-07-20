@@ -6,7 +6,6 @@ from functools import partial
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
 
 from api.chat import ChatStreamer, prompt_builder, is_token_limit_error
 from api.config import get_model_config, configs
@@ -18,6 +17,7 @@ from api.prompts import (
     DEEP_RESEARCH_INTERMEDIATE_ITERATION_PROMPT,
     SIMPLE_CHAT_SYSTEM_PROMPT
 )
+from api.chat_model import ChatCompletionRequest
 
 # Configure logging
 from api.logging_config import setup_logging
@@ -40,59 +40,6 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
-
-# Models for the API
-class ChatMessage(BaseModel):
-    role: str  # 'user' or 'assistant'
-    content: str
-
-class ChatCompletionRequest(BaseModel):
-    """
-    Model for requesting a chat completion.
-    """
-    repo_url: str = Field(..., description="URL of the repository to query")
-    messages: List[ChatMessage] = Field(..., description="List of chat messages")
-    filePath: Optional[str] = Field(None, description="Optional path to a file in the repository to include in the prompt")
-    token: Optional[str] = Field(None, description="Personal access token for private repositories")
-    type: Optional[Literal["github", "gitlab", "bitbucket"]] = Field(
-        "github",
-        description="Type of repository (e.g., 'github', 'gitlab', 'bitbucket')",
-    )
-
-    # model parameters
-    provider: str = Field("google", description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope)")
-    model: Optional[str] = Field(None, description="Model name for the specified provider")
-
-    language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
-    excluded_dirs: List[str] = Field(
-        default_factory=list,
-        description="Comma-separated list of directories to exclude from processing",
-    )
-    excluded_files: List[str] = Field(
-        default_factory=list,
-        description="Comma-separated list of file patterns to exclude from processing",
-    )
-    included_dirs: List[str] = Field(
-        default_factory=list,
-        description="Comma-separated list of directories to include exclusively",
-    )
-    included_files: List[str] = Field(
-        default_factory=list,
-        description="Comma-separated list of file patterns to include exclusively",
-    )
-
-    @field_validator(
-        "excluded_dirs",
-        "excluded_files",
-        "included_dirs",
-        "included_files",
-        mode="before",
-    )
-    @classmethod
-    def validate_path(cls, value: list[str] | str) -> list[str]:
-        if isinstance(value, str):
-            value = [unquote(path) for path in value.strip().split("\n")]
-        return value
 
 
 @app.post("/chat/completions/stream")
