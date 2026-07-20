@@ -17,6 +17,7 @@ const getWebSocketUrl = () => {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  mode?: 'normal' | 'deep_research';
 }
 
 export interface ChatCompletionRequest {
@@ -28,6 +29,7 @@ export interface ChatCompletionRequest {
   provider?: string;
   model?: string;
   language?: string;
+  research_iteration?: number;
   excluded_dirs?: string;
   excluded_files?: string;
 }

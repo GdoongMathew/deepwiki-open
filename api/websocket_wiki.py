@@ -119,22 +119,11 @@ async def handle_websocket_chat(websocket: WebSocket):
                     )
 
         # Check if this is a Deep Research request
-        is_deep_research = False
-        research_iteration = 1
-
-        # Process messages to detect Deep Research requests
-        for msg in request.messages:
-            if hasattr(msg, 'content') and msg.content and "[DEEP RESEARCH]" in msg.content:
-                is_deep_research = True
-                # Only remove the tag from the last message
-                if msg == request.messages[-1]:
-                    # Remove the Deep Research tag
-                    msg.content = msg.content.replace("[DEEP RESEARCH]", "").strip()
+        is_deep_research = last_message.mode == "deep_research"
 
         # Count research iterations if this is a Deep Research request
         if is_deep_research:
-            research_iteration = sum(1 for msg in request.messages if msg.role == 'assistant') + 1
-            logger.info(f"Deep Research request detected - iteration {research_iteration}")
+            logger.info("Deep Research request detected - iteration %d", request.research_iteration)
 
             # Check if this is a continuation request
             if "continue" in last_message.content.lower() and "research" in last_message.content.lower():
@@ -142,7 +131,7 @@ async def handle_websocket_chat(websocket: WebSocket):
                 original_topic = None
                 for msg in request.messages:
                     if msg.role == "user" and "continue" not in msg.content.lower():
-                        original_topic = msg.content.replace("[DEEP RESEARCH]", "").strip()
+                        original_topic = msg.content.strip()
                         logger.info(f"Found original research topic: {original_topic}")
                         break
 
@@ -222,10 +211,10 @@ async def handle_websocket_chat(websocket: WebSocket):
         # Create system prompt
         if is_deep_research:
             # Check if this is the first iteration
-            is_first_iteration = research_iteration == 1
+            is_first_iteration = request.research_iteration == 1
 
             # Check if this is the final iteration
-            is_final_iteration = research_iteration >= 5
+            is_final_iteration = request.research_iteration >= 5
 
             if is_first_iteration:
                 system_prompt = DEEP_RESEARCH_FIRST_ITERATION_PROMPT.format(
@@ -246,7 +235,7 @@ async def handle_websocket_chat(websocket: WebSocket):
                     repo_type=repo_type,
                     repo_url=repo_url,
                     repo_name=repo_name,
-                    research_iteration=research_iteration,
+                    research_iteration=request.research_iteration,
                     language_name=language_name
                 )
         else:
