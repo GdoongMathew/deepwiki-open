@@ -1,12 +1,12 @@
 import logging
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Literal
 from urllib.parse import unquote
 from functools import partial
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.chat import ChatStreamer, prompt_builder, is_token_limit_error
 from api.config import get_model_config, configs
@@ -54,17 +54,45 @@ class ChatCompletionRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., description="List of chat messages")
     filePath: Optional[str] = Field(None, description="Optional path to a file in the repository to include in the prompt")
     token: Optional[str] = Field(None, description="Personal access token for private repositories")
-    type: Optional[str] = Field("github", description="Type of repository (e.g., 'github', 'gitlab', 'bitbucket')")
+    type: Optional[Literal["github", "gitlab", "bitbucket"]] = Field(
+        "github",
+        description="Type of repository (e.g., 'github', 'gitlab', 'bitbucket')",
+    )
 
     # model parameters
     provider: str = Field("google", description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope)")
     model: Optional[str] = Field(None, description="Model name for the specified provider")
 
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
-    excluded_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to exclude from processing")
-    excluded_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to exclude from processing")
-    included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
-    included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
+    excluded_dirs: List[str] = Field(
+        default_factory=list,
+        description="Comma-separated list of directories to exclude from processing",
+    )
+    excluded_files: List[str] = Field(
+        default_factory=list,
+        description="Comma-separated list of file patterns to exclude from processing",
+    )
+    included_dirs: List[str] = Field(
+        default_factory=list,
+        description="Comma-separated list of directories to include exclusively",
+    )
+    included_files: List[str] = Field(
+        default_factory=list,
+        description="Comma-separated list of file patterns to include exclusively",
+    )
+
+    @field_validator(
+        "excluded_dirs",
+        "excluded_files",
+        "included_dirs",
+        "included_files",
+        mode="before",
+    )
+    @classmethod
+    def validate_path(cls, value: list[str] | str) -> list[str]:
+        if isinstance(value, str):
+            value = [unquote(path) for path in value.strip().split("\n")]
+        return value
 
 
 @app.post("/chat/completions/stream")
@@ -87,25 +115,24 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             request_rag = RAG(provider=request.provider, model=request.model)
 
             # Extract custom file filter parameters if provided
-            excluded_dirs = None
-            excluded_files = None
-            included_dirs = None
-            included_files = None
-
             if request.excluded_dirs:
-                excluded_dirs = [unquote(dir_path) for dir_path in request.excluded_dirs.split('\n') if dir_path.strip()]
-                logger.info(f"Using custom excluded directories: {excluded_dirs}")
+                logger.info(f"Using custom excluded directories: {request.excluded_dirs}")
             if request.excluded_files:
-                excluded_files = [unquote(file_pattern) for file_pattern in request.excluded_files.split('\n') if file_pattern.strip()]
-                logger.info(f"Using custom excluded files: {excluded_files}")
+                logger.info(f"Using custom excluded files: {request.excluded_files}")
             if request.included_dirs:
-                included_dirs = [unquote(dir_path) for dir_path in request.included_dirs.split('\n') if dir_path.strip()]
-                logger.info(f"Using custom included directories: {included_dirs}")
+                logger.info(f"Using custom included directories: {request.included_dirs}")
             if request.included_files:
-                included_files = [unquote(file_pattern) for file_pattern in request.included_files.split('\n') if file_pattern.strip()]
-                logger.info(f"Using custom included files: {included_files}")
+                logger.info(f"Using custom included files: {request.included_files}")
 
-            request_rag.prepare_retriever(request.repo_url, request.type, request.token, excluded_dirs, excluded_files, included_dirs, included_files)
+            request_rag.prepare_retriever(
+                request.repo_url,
+                request.type,
+                request.token,
+                excluded_dirs=request.excluded_dirs,
+                excluded_files=request.excluded_files,
+                included_dirs=request.included_dirs,
+                included_files=request.included_files,
+            )
             logger.info(f"Retriever prepared for {request.repo_url}")
         except ValueError as e:
             if "No valid documents with embeddings found" in str(e):
