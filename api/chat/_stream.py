@@ -198,7 +198,7 @@ class AzureChatStreamer(_OpenAICompatStreamer):
     )
 
     def _build_client(self):
-        from adalflow.components.model_client import AzureAIClient
+        from api.clients import AzureAIClient
         return AzureAIClient()
 
 
