@@ -27,6 +27,13 @@ class ChatCompletionRequest(BaseModel):
     model: Optional[str] = Field(None, description="Model name for the specified provider")
 
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
+
+    research_iteration: int = Field(
+        default=1,
+        ge=1,
+        description="Current deep research iteration (1-based). Only used when the request is in deep_research mode.",
+    )
+
     excluded_dirs: List[str] = Field(
         default_factory=list,
         description="List or newline-separated string of directories to exclude from processing",

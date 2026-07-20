@@ -117,21 +117,10 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
         # Check if this is a Deep Research request
         is_deep_research = last_message.mode == "deep_research"
-        research_iteration = 1
 
         # Count research iterations if this is a Deep Research request
         if is_deep_research:
-            # only count the assistant turns within the current deep research streak, so that mode switched
-            # before wouldn't inflate the current research iteration
-            current_streak = 0
-            for msg in reversed(request.messages):
-                if msg.role == "user" and msg.mode != "deep_research":
-                    break
-                if msg.role == "assistant":
-                    current_streak += 1
-
-            research_iteration = current_streak + 1
-            logger.info(f"Deep Research request detected - iteration {research_iteration}")
+            logger.info("Deep Research request detected - iteration %d",request.research_iteration)
 
             # Check if this is a continuation request
             if "continue" in last_message.content.lower() and "research" in last_message.content.lower():
@@ -219,10 +208,10 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         # Create system prompt
         if is_deep_research:
             # Check if this is the first iteration
-            is_first_iteration = research_iteration == 1
+            is_first_iteration = request.research_iteration == 1
 
             # Check if this is the final iteration
-            is_final_iteration = research_iteration >= 5
+            is_final_iteration = request.research_iteration >= 5
 
             if is_first_iteration:
                 system_prompt = DEEP_RESEARCH_FIRST_ITERATION_PROMPT.format(
@@ -243,7 +232,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                     repo_type=repo_type,
                     repo_url=repo_url,
                     repo_name=repo_name,
-                    research_iteration=research_iteration,
+                    research_iteration=request.research_iteration,
                     language_name=language_name
                 )
         else:

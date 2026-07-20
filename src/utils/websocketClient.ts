@@ -29,6 +29,7 @@ export interface ChatCompletionRequest {
   provider?: string;
   model?: string;
   language?: string;
+  research_iteration?: number;
   excluded_dirs?: string;
   excluded_files?: string;
 }

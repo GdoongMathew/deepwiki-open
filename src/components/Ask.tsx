@@ -326,7 +326,8 @@ const Ask: React.FC<AskProps> = ({
         })),
         provider: selectedProvider,
         model: isCustomSelectedModel ? customSelectedModel : selectedModel,
-        language: language
+        language: language,
+        research_iteration: newIteration
       };
 
       // Add tokens if available
@@ -573,7 +574,8 @@ const Ask: React.FC<AskProps> = ({
         })),
         provider: selectedProvider,
         model: isCustomSelectedModel ? customSelectedModel : selectedModel,
-        language: language
+        language: language,
+        research_iteration: deepResearch ? 1 : undefined
       };
 
       // Add tokens if available
