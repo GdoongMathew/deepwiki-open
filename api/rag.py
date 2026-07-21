@@ -49,9 +49,18 @@ logger = logging.getLogger(__name__)
 MAX_INPUT_TOKENS = 7500  # Safe threshold below 8192 token limit
 
 # Maximum concurrent RAG preparing count
-_RAG_PREPARE_SEMAPHORE = asyncio.Semaphore(
-    int(os.environ.get("DEEPWIKI_MAX_CONCURRENT_RAG", "4"))
-)
+_RAG_PREPARE_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _get_rag_semaphore() -> asyncio.Semaphore:
+    global _RAG_PREPARE_SEMAPHORE
+    if _RAG_PREPARE_SEMAPHORE is None:
+        _RAG_PREPARE_SEMAPHORE = asyncio.Semaphore(
+            int(os.environ.get("DEEPWIKI_MAX_CONCURRENT_RAG", "4"))
+        )
+    assert _RAG_PREPARE_SEMAPHORE is not None
+    return _RAG_PREPARE_SEMAPHORE
+
 
 class Memory(adal.core.component.DataComponent):
     """Simple conversation management with a list of dialog turns."""
@@ -427,7 +436,7 @@ IMPORTANT FORMATTING RULES:
             included_dirs: Optional list of directories to include exclusively
             included_files: Optional list of file patterns to include exclusively
         """
-        async with _RAG_PREPARE_SEMAPHORE:
+        async with _get_rag_semaphore():
             return await asyncio.to_thread(
                 self.prepare_retriever,
                 repo_url_or_path,
