@@ -58,7 +58,7 @@ def _get_rag_semaphore() -> asyncio.Semaphore:
         _RAG_PREPARE_SEMAPHORE = asyncio.Semaphore(
             int(os.environ.get("DEEPWIKI_MAX_CONCURRENT_RAG", "4"))
         )
-    assert _RAG_PREPARE_SEMAPHORE is not None
+    assert isinstance(_RAG_PREPARE_SEMAPHORE, asyncio.Semaphore)
     return _RAG_PREPARE_SEMAPHORE
 
 
