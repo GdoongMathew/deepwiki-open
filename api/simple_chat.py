@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Callable
 from functools import partial
@@ -58,7 +59,12 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
         # Create a new RAG instance for this request
         try:
-            request_rag = RAG(provider=request.provider, model=request.model)
+            # async do RAG initialization
+            request_rag = await asyncio.to_thread(
+                RAG,
+                provider=request.provider,
+                model=request.model,
+            )
 
             # Extract custom file filter parameters if provided
             if request.excluded_dirs:
@@ -70,7 +76,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             if request.included_files:
                 logger.info(f"Using custom included files: {request.included_files}")
 
-            request_rag.prepare_retriever(
+            await request_rag.aprepare_retriever(
                 request.repo_url,
                 request.type,
                 request.token,
@@ -167,7 +173,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                 # Try to perform RAG retrieval
                 try:
                     # This will use the actual RAG implementation
-                    retrieved_documents = request_rag(rag_query, language=request.language)
+                    retrieved_documents = await request_rag.acall(rag_query, language=request.language)
 
                     if retrieved_documents and retrieved_documents[0].documents:
                         # Format context for the prompt in a more structured way
@@ -258,7 +264,13 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         file_content = ""
         if request.filePath:
             try:
-                file_content = get_file_content(request.repo_url, request.filePath, request.type, request.token)
+                file_content = await asyncio.to_thread(
+                    get_file_content,
+                    repo_url=request.repo_url,
+                    file_path=request.filePath,
+                    repo_type=request.type,
+                    access_token=request.token,
+                )
                 logger.info(f"Successfully retrieved content for file: {request.filePath}")
             except Exception as e:
                 logger.error(f"Error retrieving file content: {str(e)}")

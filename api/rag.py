@@ -1,6 +1,6 @@
 import logging
-import weakref
-import re
+import asyncio
+import os
 from dataclasses import dataclass
 from typing import Any, List, Tuple, Dict
 from uuid import uuid4
@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 
 # Maximum token limit for embedding models
 MAX_INPUT_TOKENS = 7500  # Safe threshold below 8192 token limit
+
+# Maximum concurrent RAG preparing count
+_RAG_PREPARE_SEMAPHORE = asyncio.Semaphore(
+    int(os.environ.get("DEEPWIKI_MAX_CONCURRENT_RAG", "4"))
+)
 
 class Memory(adal.core.component.DataComponent):
     """Simple conversation management with a list of dialog turns."""
@@ -396,6 +401,44 @@ IMPORTANT FORMATTING RULES:
                 logger.error(f"Sample embedding sizes: {', '.join(sizes)}")
             raise
 
+    async def aprepare_retriever(
+            self,
+            repo_url_or_path: str,
+            type: str = "github",
+            access_token: str | None = None,
+            excluded_dirs: list[str] | None = None,
+            excluded_files: list[str] | None = None,
+            included_dirs: list[str] | None = None,
+            included_files: list[str] | None = None,
+    ):
+        """Async version of the original `prepare_retriever`.
+
+        Reuse the synchronous `prepare_retriever` implementation, but runs it in
+        a worker thread via `asyncio.to_thread` so that blocking operations (such
+        as git.clone, file io, embedding calls) do not stall the outer event loop.
+        Concurrency is bounded by a module-level semaphore, set by system variable
+        'DEEPWIKI_MAX_CONCURRENT_RAG'.
+
+        Args:
+            repo_url_or_path: URL or local path to the repository
+            access_token: Optional access token for private repositories
+            excluded_dirs: Optional list of directories to exclude from processing
+            excluded_files: Optional list of file patterns to exclude from processing
+            included_dirs: Optional list of directories to include exclusively
+            included_files: Optional list of file patterns to include exclusively
+        """
+        async with _RAG_PREPARE_SEMAPHORE:
+            return await asyncio.to_thread(
+                self.prepare_retriever,
+                repo_url_or_path,
+                type=type,
+                access_token=access_token,
+                excluded_dirs=excluded_dirs,
+                excluded_files=excluded_files,
+                included_dirs=included_dirs,
+                included_files=included_files,
+            )
+
     def call(self, query: str, language: str = "en") -> Tuple[List]:
         """
         Process a query using RAG.
@@ -426,3 +469,8 @@ IMPORTANT FORMATTING RULES:
                 answer=f"I apologize, but I encountered an error while processing your question. Please try again or rephrase your question."
             )
             return error_response, []
+
+    async def acall(self, query: str, language: str = "en") -> tuple[list]:
+        """Async version of the original `call` method.
+        """
+        return await asyncio.to_thread(self.call, query, language)
