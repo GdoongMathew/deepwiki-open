@@ -18,7 +18,7 @@ class ChatCompletionRequest(BaseModel):
     token: Optional[str] = Field(None, description="Personal access token for private repositories")
     type: Optional[Literal["local", "github", "gitlab", "bitbucket"]] = Field(
         "github",
-        description="Type of repository (e.g., 'github', 'gitlab', 'bitbucket')",
+        description="Type of repository (e.g., 'local', 'github', 'gitlab', 'bitbucket')",
     )
 
     # model parameters
