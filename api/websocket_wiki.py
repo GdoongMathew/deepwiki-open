@@ -262,29 +262,6 @@ async def handle_websocket_chat(websocket: WebSocket):
             if not isinstance(turn_id, int) and hasattr(turn, 'user_query') and hasattr(turn, 'assistant_response'):
                 conversation_history += f"<turn>\n<user>{turn.user_query.query_str}</user>\n<assistant>{turn.assistant_response.response_str}</assistant>\n</turn>\n"
 
-        # Create the prompt with context
-        prompt = f"/no_think {system_prompt}\n\n"
-
-        if conversation_history:
-            prompt += f"<conversation_history>\n{conversation_history}</conversation_history>\n\n"
-
-        # Check if filePath is provided and fetch file content if it exists
-        if file_content:
-            # Add file content to the prompt after conversation history
-            prompt += f"<currentFileContent path=\"{request.filePath}\">\n{file_content}\n</currentFileContent>\n\n"
-
-        # Only include context if it's not empty
-        CONTEXT_START = "<START_OF_CONTEXT>"
-        CONTEXT_END = "<END_OF_CONTEXT>"
-        if context_text.strip():
-            prompt += f"{CONTEXT_START}\n{context_text}\n{CONTEXT_END}\n\n"
-        else:
-            # Add a note that we're skipping RAG due to size constraints or because it's the isolated API
-            logger.info("No context available from RAG")
-            prompt += "<note>Answering without retrieval augmentation.</note>\n\n"
-
-        prompt += f"<query>\n{query}\n</query>\n\nAssistant: "
-
         async def stream_and_fallback(
                 streamer: ChatStreamer,
                 prompt_func: Callable[[], str],
