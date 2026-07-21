@@ -50,7 +50,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         if request.messages and len(request.messages) > 0:
             last_message = request.messages[-1]
             if hasattr(last_message, 'content') and last_message.content:
-                tokens = count_tokens(last_message.content, request.provider == "ollama")
+                tokens = count_tokens(last_message.content, embedder_type=request.provider)
                 logger.info(f"Request size: {tokens} tokens")
                 if tokens > MAX_INPUT_TOKENS:
                     logger.warning(f"Request exceeds recommended token limit ({tokens} > {MAX_INPUT_TOKENS})")
