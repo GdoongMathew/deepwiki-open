@@ -34,6 +34,19 @@ interface ResearchStage {
   type: 'plan' | 'update' | 'conclusion';
 }
 
+// A finished exchange kept in the conversation log so previous
+// question/answer pairs are preserved instead of being overwritten.
+interface ConversationTurn {
+  question: string;
+  response: string;
+  mode: 'normal' | 'deep_research';
+  // For deep research turns, every iteration/stage is preserved so the
+  // committed section can still browse the full multi-turn investigation.
+  researchStages?: ResearchStage[];
+  // Index of the stage currently shown for this turn.
+  stageIndex?: number;
+}
+
 interface AskProps {
   repoInfo: RepoInfo;
   provider?: string;
@@ -75,8 +88,13 @@ const Ask: React.FC<AskProps> = ({
   const [conversationHistory, setConversationHistory] = useState<Message[]>([]);
   const [researchIteration, setResearchIteration] = useState(0);
   const [researchComplete, setResearchComplete] = useState(false);
+  // Completed exchanges rendered as stacked sections above the live response.
+  const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([]);
+  // The question that produced the currently-streaming response.
+  const [currentQuestion, setCurrentQuestion] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
   const providerRef = useRef(provider);
   const modelRef = useRef(model);
 
@@ -94,12 +112,15 @@ const Ask: React.FC<AskProps> = ({
     }
   }, [onRef]);
 
-  // Scroll to bottom of response when it changes
+  // Keep the newest content in view as the conversation grows or streams.
   useEffect(() => {
     if (responseRef.current) {
       responseRef.current.scrollTop = responseRef.current.scrollHeight;
     }
-  }, [response]);
+    if (conversationEndRef.current) {
+      conversationEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [response, conversationTurns]);
 
   // Close WebSocket when component unmounts
   useEffect(() => {
@@ -153,6 +174,8 @@ const Ask: React.FC<AskProps> = ({
     setQuestion('');
     setResponse('');
     setConversationHistory([]);
+    setConversationTurns([]);
+    setCurrentQuestion('');
     setResearchIteration(0);
     setResearchComplete(false);
     setResearchStages([]);
@@ -161,8 +184,16 @@ const Ask: React.FC<AskProps> = ({
       inputRef.current.focus();
     }
   };
-  const downloadresponse = () =>{
-  const blob = new Blob([response], { type: 'text/markdown' });
+
+  // Build the message list for previously completed turns so follow-up
+  // questions carry the earlier conversation as context.
+  const buildHistoryFromTurns = (): Message[] =>
+    conversationTurns.flatMap(turn => [
+      { role: 'user' as const, content: turn.question, mode: turn.mode },
+      { role: 'assistant' as const, content: turn.response },
+    ]);
+  const downloadresponse = (content: string = response) =>{
+  const blob = new Blob([content], { type: 'text/markdown' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -277,6 +308,9 @@ const Ask: React.FC<AskProps> = ({
 
   // WebSocket reference
   const webSocketRef = useRef<WebSocket | null>(null);
+  // True while an HTTP fallback is running, so the WebSocket close handler
+  // doesn't also commit a (partial/errored) turn.
+  const fallbackActiveRef = useRef(false);
 
   // Function to continue research automatically
   const continueResearch = async () => {
@@ -378,10 +412,12 @@ const Ask: React.FC<AskProps> = ({
           setResponse(prev => prev + '\n\nError: WebSocket connection failed. Falling back to HTTP...');
 
           // Fallback to HTTP if WebSocket fails
-          fallbackToHttp(requestBody);
+          fallbackActiveRef.current = true;
+          fallbackToHttp(requestBody, currentQuestion, 'deep_research');
         },
         // Close handler
         () => {
+          if (fallbackActiveRef.current) return;
           // Check if research is complete when the WebSocket closes
           const isComplete = checkIfResearchComplete(fullResponse);
 
@@ -410,7 +446,11 @@ const Ask: React.FC<AskProps> = ({
   };
 
   // Fallback to HTTP if WebSocket fails
-  const fallbackToHttp = async (requestBody: ChatCompletionRequest) => {
+  const fallbackToHttp = async (
+    requestBody: ChatCompletionRequest,
+    committedQuestion: string,
+    mode: 'normal' | 'deep_research'
+  ) => {
     try {
       // Make the API call using HTTP
       const apiResponse = await fetch(`/api/chat/stream`, {
@@ -445,7 +485,7 @@ const Ask: React.FC<AskProps> = ({
 
         // Extract research stage if this is a deep research response
         if (deepResearch) {
-          const stage = extractResearchStage(fullResponse, researchIteration);
+          const stage = extractResearchStage(fullResponse, requestBody.research_iteration ?? 1);
           if (stage) {
             // Add the stage to the research stages
             setResearchStages(prev => {
@@ -462,26 +502,40 @@ const Ask: React.FC<AskProps> = ({
         }
       }
 
-      // Check if research is complete
-      const isComplete = checkIfResearchComplete(fullResponse);
-
-      // Force completion after a maximum number of iterations (5)
-      const forceComplete = researchIteration >= 5;
-
-      if (forceComplete && !isComplete) {
-        // If we're forcing completion, append a comprehensive conclusion to the response
-        const completionNote = "\n\n## Final Conclusion\nAfter multiple iterations of deep research, we've gathered significant insights about this topic. This concludes our investigation process, having reached the maximum number of research iterations. The findings presented across all iterations collectively form our comprehensive answer to the original question.";
-        fullResponse += completionNote;
-        setResponse(fullResponse);
-        setResearchComplete(true);
+      if (mode === 'normal') {
+        // Normal mode: append the finished answer to the conversation log.
+        commitTurn(committedQuestion, fullResponse, 'normal');
       } else {
-        setResearchComplete(isComplete);
+        // Deep research: mirror the WebSocket close handlers so the iteration
+        // counter advances and the auto-continue loop keeps running even when
+        // every request falls back to HTTP (the WebSocket never connects).
+        const iter = requestBody.research_iteration ?? 1;
+        if (iter === 1) {
+          // Iteration 1 is the research plan — always advance into the
+          // subsequent iterations. Advancing here (after the stream finishes)
+          // means the next turn captures this real answer, not a stale note.
+          setResearchComplete(false);
+          setResearchIteration(1);
+        } else if (iter >= 5) {
+          // Force a conclusion once the maximum iteration count is reached.
+          const isComplete = checkIfResearchComplete(fullResponse);
+          if (!isComplete) {
+            const completionNote = "\n\n## Final Conclusion\nAfter multiple iterations of deep research, we've gathered significant insights about this topic. This concludes our investigation process, having reached the maximum number of research iterations. The findings presented across all iterations collectively form our comprehensive answer to the original question.";
+            fullResponse += completionNote;
+            setResponse(fullResponse);
+          }
+          setResearchComplete(true);
+        } else {
+          // Intermediate iterations: stop only if the model signalled completion.
+          setResearchComplete(checkIfResearchComplete(fullResponse));
+        }
       }
     } catch (error) {
       console.error('Error during HTTP fallback:', error);
       setResponse(prev => prev + '\n\nError: Failed to get a response. Please try again.');
       setResearchComplete(true);
     } finally {
+      fallbackActiveRef.current = false;
       setIsLoading(false);
     }
   };
@@ -489,7 +543,9 @@ const Ask: React.FC<AskProps> = ({
   // Effect to continue research when response is updated
   useEffect(() => {
     if (deepResearch && response && !isLoading && !researchComplete) {
-      const isComplete = checkIfResearchComplete(response);
+      // Iteration 1 is the plan and is never "complete"; only apply the
+      // completion heuristic from the second iteration onward.
+      const isComplete = researchIteration >= 2 && checkIfResearchComplete(response);
       if (isComplete) {
         setResearchComplete(true);
       } else if (researchIteration > 0 && researchIteration < 5) {
@@ -503,6 +559,18 @@ const Ask: React.FC<AskProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response, isLoading, deepResearch, researchComplete, researchIteration]);
+
+  // When a deep research process finishes, move the final answer into the
+  // conversation log so it is preserved as its own section.
+  useEffect(() => {
+    if (deepResearch && researchComplete && !isLoading && response && currentQuestion) {
+      commitTurn(currentQuestion, response, 'deep_research', researchStages);
+      setResearchIteration(0);
+      setResearchComplete(false);
+      fallbackActiveRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [researchComplete, isLoading, researchStages]);
 
   // Effect to update research stages when the response changes
   useEffect(() => {
@@ -546,21 +614,32 @@ const Ask: React.FC<AskProps> = ({
 
   // Handle confirm and send request
   const handleConfirmAsk = async () => {
+    // Capture the question for this turn and clear the input so the user
+    // can immediately type a follow-up.
+    const askedQuestion = question;
+    const askedMode: 'normal' | 'deep_research' = deepResearch ? 'deep_research' : 'normal';
+
+    fallbackActiveRef.current = false;
     setIsLoading(true);
     setResponse('');
+    setCurrentQuestion(askedQuestion);
+    setQuestion('');
     setResearchIteration(0);
     setResearchComplete(false);
+    setResearchStages([]);
+    setCurrentStageIndex(0);
 
     try {
       // Create initial message
       const initialMessage: Message = {
         role: 'user',
-        content: question,
-        mode: deepResearch ? 'deep_research' : 'normal'
+        content: askedQuestion,
+        mode: askedMode
       };
 
-      // Set initial conversation history
-      const newHistory: Message[] = [initialMessage];
+      // Include previously completed turns so the backend keeps context,
+      // then append the new question.
+      const newHistory: Message[] = [...buildHistoryFromTurns(), initialMessage];
       setConversationHistory(newHistory);
 
       // Prepare request body
@@ -612,20 +691,23 @@ const Ask: React.FC<AskProps> = ({
           setResponse(prev => prev + '\n\nError: WebSocket connection failed. Falling back to HTTP...');
 
           // Fallback to HTTP if WebSocket fails
-          fallbackToHttp(requestBody);
+          fallbackActiveRef.current = true;
+          fallbackToHttp(requestBody, askedQuestion, askedMode);
         },
         // Close handler
         () => {
+          if (fallbackActiveRef.current) return;
           // If deep research is enabled, check if we should continue
           if (deepResearch) {
-            const isComplete = checkIfResearchComplete(fullResponse);
-            setResearchComplete(isComplete);
-
-            // If not complete, start the research process
-            if (!isComplete) {
-              setResearchIteration(1);
-              // The continueResearch function will be triggered by the useEffect
-            }
+            // Iteration 1 is the initial research plan — always continue into
+            // the deeper iterations instead of letting the completion
+            // heuristic (which can false-positive on the plan text) stop here.
+            setResearchComplete(false);
+            setResearchIteration(1);
+            // The continueResearch function will be triggered by the useEffect.
+          } else {
+            // Normal mode: the answer is final, so append it to the log.
+            commitTurn(askedQuestion, fullResponse, 'normal');
           }
 
           setIsLoading(false);
@@ -637,6 +719,54 @@ const Ask: React.FC<AskProps> = ({
       setResearchComplete(true);
       setIsLoading(false);
     }
+  };
+
+  // Move a finished exchange out of the live response area and into the
+  // persistent conversation log.
+  const commitTurn = (
+    turnQuestion: string,
+    turnResponse: string,
+    mode: 'normal' | 'deep_research',
+    stages: ResearchStage[] = []
+  ) => {
+    if (!turnQuestion && !turnResponse) return;
+
+    // For deep research, make sure the final answer is always present as the
+    // last stage (stage extraction can miss it, e.g. on forced completion).
+    let finalStages = stages;
+    if (mode === 'deep_research') {
+      const last = stages[stages.length - 1];
+      if (turnResponse && (!last || last.content !== turnResponse)) {
+        finalStages = [
+          ...stages,
+          {
+            title: 'Final Result',
+            content: turnResponse,
+            iteration: stages.length + 1,
+            type: 'conclusion',
+          },
+        ];
+      }
+    }
+
+    setConversationTurns(prev => [...prev, {
+      question: turnQuestion,
+      response: turnResponse,
+      mode,
+      researchStages: finalStages,
+      stageIndex: finalStages.length > 0 ? finalStages.length - 1 : 0,
+    }]);
+    setResponse('');
+    setCurrentQuestion('');
+    setResearchStages([]);
+    setCurrentStageIndex(0);
+  };
+
+  // Switch which research stage is shown for a committed deep research turn.
+  const setTurnStage = (turnIndex: number, stageIndex: number) => {
+    setConversationTurns(prev =>
+      prev.map((turn, i) => (i === turnIndex ? { ...turn, stageIndex } : turn))
+    );
   };
 
   const [buttonWidth, setButtonWidth] = useState(0);
@@ -651,165 +781,153 @@ const Ask: React.FC<AskProps> = ({
   }, [messages.ask?.askButton, isLoading]);
 
   return (
-    <div>
-      <div className="p-4">
-        <div className="flex items-center justify-end mb-4">
-          {/* Model selection button */}
-          <button
-            type="button"
-            onClick={() => setIsModelSelectionModalOpen(true)}
-            className="text-xs px-2.5 py-1 rounded border border-[var(--border-color)]/40 bg-[var(--background)]/10 text-[var(--foreground)]/80 hover:bg-[var(--background)]/30 hover:text-[var(--foreground)] transition-colors flex items-center gap-1.5"
-          >
-            <span>{selectedProvider}/{isCustomSelectedModel ? customSelectedModel : selectedModel}</span>
-            <svg className="h-3.5 w-3.5 text-[var(--accent-primary)]/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-          </button>
-        </div>
+    <div className="flex flex-col min-h-full">
+      {/* Conversation log: previous turns are preserved and new results
+          are appended below as their own sections. */}
+      <div className="flex-1 px-4 pt-4 space-y-6">
+        {conversationTurns.map((turn, idx) => {
+          // Deep research turns keep every iteration; show the selected one
+          // and expose navigation. Normal turns just show their response.
+          const stages = turn.researchStages ?? [];
+          const hasStages = turn.mode === 'deep_research' && stages.length > 0;
+          const activeStage = hasStages
+            ? Math.min(turn.stageIndex ?? stages.length - 1, stages.length - 1)
+            : 0;
+          const displayContent = hasStages ? stages[activeStage].content : turn.response;
 
-        {/* Question input */}
-        <form onSubmit={handleSubmit} className="mt-4">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder={messages.ask?.placeholder || 'What would you like to know about this codebase?'}
-              className="block w-full rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[var(--foreground)] px-5 py-3.5 text-base shadow-sm focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/30 focus:outline-none transition-all"
-              style={{ paddingRight: `${buttonWidth + 24}px` }}
-              disabled={isLoading}
-            />
-            <button
-              ref={buttonRef}
-              type="submit"
-              disabled={isLoading || !question.trim()}
-              className={`absolute right-3 top-1/2 transform -translate-y-1/2 px-4 py-2 rounded-md font-medium text-sm ${
-                isLoading || !question.trim()
-                  ? 'bg-[var(--button-disabled-bg)] text-[var(--button-disabled-text)] cursor-not-allowed'
-                  : 'bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-primary)]/90 shadow-sm'
-              } transition-all duration-200 flex items-center gap-1.5`}
-            >
-              {isLoading ? (
-                <div className="w-4 h-4 rounded-full border-2 border-t-transparent border-white animate-spin" />
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                  </svg>
-                  <span>{messages.ask?.askButton || 'Ask'}</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Deep Research toggle */}
-          <div className="flex items-center mt-2 justify-between">
-            <div className="group relative">
-              <label className="flex items-center cursor-pointer">
-                <span className="text-xs text-gray-600 dark:text-gray-400 mr-2">Deep Research</span>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={deepResearch}
-                    onChange={() => setDeepResearch(!deepResearch)}
-                    className="sr-only"
-                  />
-                  <div className={`w-10 h-5 rounded-full transition-colors ${deepResearch ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
-                  <div className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform transform ${deepResearch ? 'translate-x-5' : ''}`}></div>
+          return (
+            <div key={idx} className="space-y-2">
+              {/* User question */}
+              <div className="flex justify-end">
+                <div className="max-w-[85%] rounded-lg px-4 py-2 bg-[var(--accent-primary)]/10 text-[var(--foreground)] text-sm whitespace-pre-wrap break-words">
+                  {turn.question}
                 </div>
-              </label>
-              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 w-72 z-10">
-                <div className="relative">
-                  <div className="absolute -bottom-2 left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
-                  <p className="mb-1">Deep Research conducts a multi-turn investigation process:</p>
-                  <ul className="list-disc pl-4 text-xs">
-                    <li><strong>Initial Research:</strong> Creates a research plan and initial findings</li>
-                    <li><strong>Iteration 1:</strong> Explores specific aspects in depth</li>
-                    <li><strong>Iteration 2:</strong> Investigates remaining questions</li>
-                    <li><strong>Iterations 3-4:</strong> Dives deeper into complex areas</li>
-                    <li><strong>Final Conclusion:</strong> Comprehensive answer based on all iterations</li>
-                  </ul>
-                  <p className="mt-1 text-xs italic">The AI automatically continues research until complete (up to 5 iterations)</p>
+              </div>
+
+              {/* Assistant response */}
+              <div className="rounded-lg border border-[var(--border-color)]/40 bg-[var(--background)]/30">
+                {turn.mode === 'deep_research' && (
+                  <div className="px-4 pt-2 text-xs text-purple-600 dark:text-purple-400">
+                    Deep Research
+                    {hasStages && ` — ${stages[activeStage]?.title || `Stage ${activeStage + 1}`}`}
+                  </div>
+                )}
+                <div className="p-4">
+                  <Markdown content={displayContent} />
+                </div>
+                <div className="p-2 flex justify-between items-center border-t border-[var(--border-color)]/40">
+                  {/* Stage navigation for deep research */}
+                  {hasStages && stages.length > 1 ? (
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setTurnStage(idx, Math.max(0, activeStage - 1))}
+                        disabled={activeStage === 0}
+                        className={`p-1 rounded-md ${activeStage === 0 ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                        aria-label="Previous stage"
+                      >
+                        <FaChevronLeft size={12} />
+                      </button>
+                      <div className="text-xs text-gray-600 dark:text-gray-400">
+                        {activeStage + 1} / {stages.length}
+                      </div>
+                      <button
+                        onClick={() => setTurnStage(idx, Math.min(stages.length - 1, activeStage + 1))}
+                        disabled={activeStage === stages.length - 1}
+                        className={`p-1 rounded-md ${activeStage === stages.length - 1 ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                        aria-label="Next stage"
+                      >
+                        <FaChevronRight size={12} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+
+                  <button
+                    onClick={() => downloadresponse(displayContent)}
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 px-2 py-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center gap-1"
+                    title="Download response as markdown file"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download
+                  </button>
                 </div>
               </div>
             </div>
-            {deepResearch && (
-              <div className="text-xs text-purple-600 dark:text-purple-400">
-                Multi-turn research process enabled
-                {researchIteration > 0 && !researchComplete && ` (iteration ${researchIteration})`}
-                {researchComplete && ` (complete)`}
+          );
+        })}
+
+        {/* Live turn: the question being asked and its streaming response */}
+        {(currentQuestion || response) && (
+          <div className="space-y-2">
+            {currentQuestion && (
+              <div className="flex justify-end">
+                <div className="max-w-[85%] rounded-lg px-4 py-2 bg-[var(--accent-primary)]/10 text-[var(--foreground)] text-sm whitespace-pre-wrap break-words">
+                  {currentQuestion}
+                </div>
               </div>
             )}
-          </div>
-        </form>
 
-        {/* Response area */}
-        {response && (
-          <div className="border-t border-gray-200 dark:border-gray-700 mt-4">
-            <div
-              ref={responseRef}
-              className="p-4 max-h-[500px] overflow-y-auto"
-            >
-              <Markdown content={response} />
-            </div>
-
-            {/* Research navigation and clear button */}
-            <div className="p-2 flex justify-between items-center border-t border-gray-200 dark:border-gray-700">
-              {/* Research navigation */}
-              {deepResearch && researchStages.length > 1 && (
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => navigateToPreviousStage()}
-                    disabled={currentStageIndex === 0}
-                    className={`p-1 rounded-md ${currentStageIndex === 0 ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    aria-label="Previous stage"
-                  >
-                    <FaChevronLeft size={12} />
-                  </button>
-
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {currentStageIndex + 1} / {researchStages.length}
-                  </div>
-
-                  <button
-                    onClick={() => navigateToNextStage()}
-                    disabled={currentStageIndex === researchStages.length - 1}
-                    className={`p-1 rounded-md ${currentStageIndex === researchStages.length - 1 ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    aria-label="Next stage"
-                  >
-                    <FaChevronRight size={12} />
-                  </button>
-
-                  <div className="text-xs text-gray-600 dark:text-gray-400 ml-2">
-                    {researchStages[currentStageIndex]?.title || `Stage ${currentStageIndex + 1}`}
-                  </div>
+            {response && (
+              <div className="rounded-lg border border-[var(--border-color)]/40 bg-[var(--background)]/30">
+                <div
+                  ref={responseRef}
+                  className="p-4 max-h-[500px] overflow-y-auto"
+                >
+                  <Markdown content={response} />
                 </div>
-              )}
 
-            <div className="flex items-center space-x-2">
-              {/* Download button */}
-              <button
-                onClick={downloadresponse}
-                className="text-xs text-gray-500 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 px-2 py-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center gap-1"
-                title="Download response as markdown file"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Download
-              </button>
+                {/* Research navigation and download */}
+                <div className="p-2 flex justify-between items-center border-t border-[var(--border-color)]/40">
+                  {/* Research navigation */}
+                  {deepResearch && researchStages.length > 1 ? (
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => navigateToPreviousStage()}
+                        disabled={currentStageIndex === 0}
+                        className={`p-1 rounded-md ${currentStageIndex === 0 ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                        aria-label="Previous stage"
+                      >
+                        <FaChevronLeft size={12} />
+                      </button>
 
-              {/* Clear button */}
-              <button
-                id="ask-clear-conversation"
-                onClick={clearConversation}
-                className="text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 px-2 py-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
-              >
-                Clear conversation
-              </button>
-            </div>
+                      <div className="text-xs text-gray-600 dark:text-gray-400">
+                        {currentStageIndex + 1} / {researchStages.length}
+                      </div>
+
+                      <button
+                        onClick={() => navigateToNextStage()}
+                        disabled={currentStageIndex === researchStages.length - 1}
+                        className={`p-1 rounded-md ${currentStageIndex === researchStages.length - 1 ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                        aria-label="Next stage"
+                      >
+                        <FaChevronRight size={12} />
+                      </button>
+
+                      <div className="text-xs text-gray-600 dark:text-gray-400 ml-2">
+                        {researchStages[currentStageIndex]?.title || `Stage ${currentStageIndex + 1}`}
+                      </div>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+
+                  {/* Download button */}
+                  <button
+                    onClick={() => downloadresponse(response)}
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 px-2 py-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center gap-1"
+                    title="Download response as markdown file"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download
+                  </button>
+                </div>
               </div>
+            )}
           </div>
         )}
 
@@ -910,6 +1028,114 @@ const Ask: React.FC<AskProps> = ({
             )}
           </div>
         )}
+
+        {/* Anchor used to keep the latest content in view */}
+        <div ref={conversationEndRef} />
+      </div>
+
+      {/* Input area — pinned to the bottom of the conversation for easy typing */}
+      <div className="sticky bottom-0 bg-[var(--card-bg)] border-t border-[var(--border-color)]/40 px-4 py-3 mt-4">
+        <div className="flex items-center justify-between mb-2">
+          {/* Model selection button */}
+          <button
+            type="button"
+            onClick={() => setIsModelSelectionModalOpen(true)}
+            className="text-xs px-2.5 py-1 rounded border border-[var(--border-color)]/40 bg-[var(--background)]/10 text-[var(--foreground)]/80 hover:bg-[var(--background)]/30 hover:text-[var(--foreground)] transition-colors flex items-center gap-1.5"
+          >
+            <span>{selectedProvider}/{isCustomSelectedModel ? customSelectedModel : selectedModel}</span>
+            <svg className="h-3.5 w-3.5 text-[var(--accent-primary)]/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+
+          {/* Clear the whole conversation */}
+          {(conversationTurns.length > 0 || response || currentQuestion) && (
+            <button
+              id="ask-clear-conversation"
+              onClick={clearConversation}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 px-2 py-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"
+            >
+              Clear conversation
+            </button>
+          )}
+        </div>
+
+        {/* Question input */}
+        <form onSubmit={handleSubmit}>
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder={messages.ask?.placeholder || 'What would you like to know about this codebase?'}
+              className="block w-full rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[var(--foreground)] px-5 py-3.5 text-base shadow-sm focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/30 focus:outline-none transition-all"
+              style={{ paddingRight: `${buttonWidth + 24}px` }}
+              disabled={isLoading}
+            />
+            <button
+              ref={buttonRef}
+              type="submit"
+              disabled={isLoading || !question.trim()}
+              className={`absolute right-3 top-1/2 transform -translate-y-1/2 px-4 py-2 rounded-md font-medium text-sm ${
+                isLoading || !question.trim()
+                  ? 'bg-[var(--button-disabled-bg)] text-[var(--button-disabled-text)] cursor-not-allowed'
+                  : 'bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-primary)]/90 shadow-sm'
+              } transition-all duration-200 flex items-center gap-1.5`}
+            >
+              {isLoading ? (
+                <div className="w-4 h-4 rounded-full border-2 border-t-transparent border-white animate-spin" />
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                  </svg>
+                  <span>{messages.ask?.askButton || 'Ask'}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Deep Research toggle */}
+          <div className="flex items-center mt-2 justify-between">
+            <div className="group relative">
+              <label className="flex items-center cursor-pointer">
+                <span className="text-xs text-gray-600 dark:text-gray-400 mr-2">Deep Research</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={deepResearch}
+                    onChange={() => setDeepResearch(!deepResearch)}
+                    className="sr-only"
+                  />
+                  <div className={`w-10 h-5 rounded-full transition-colors ${deepResearch ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'}`}></div>
+                  <div className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform transform ${deepResearch ? 'translate-x-5' : ''}`}></div>
+                </div>
+              </label>
+              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 w-72 z-10">
+                <div className="relative">
+                  <div className="absolute -bottom-2 left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
+                  <p className="mb-1">Deep Research conducts a multi-turn investigation process:</p>
+                  <ul className="list-disc pl-4 text-xs">
+                    <li><strong>Initial Research:</strong> Creates a research plan and initial findings</li>
+                    <li><strong>Iteration 1:</strong> Explores specific aspects in depth</li>
+                    <li><strong>Iteration 2:</strong> Investigates remaining questions</li>
+                    <li><strong>Iterations 3-4:</strong> Dives deeper into complex areas</li>
+                    <li><strong>Final Conclusion:</strong> Comprehensive answer based on all iterations</li>
+                  </ul>
+                  <p className="mt-1 text-xs italic">The AI automatically continues research until complete (up to 5 iterations)</p>
+                </div>
+              </div>
+            </div>
+            {deepResearch && (
+              <div className="text-xs text-purple-600 dark:text-purple-400">
+                Multi-turn research process enabled
+                {researchIteration > 0 && !researchComplete && ` (iteration ${researchIteration})`}
+                {researchComplete && ` (complete)`}
+              </div>
+            )}
+          </div>
+        </form>
       </div>
 
       {/* Model Selection Modal */}
