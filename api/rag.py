@@ -205,42 +205,6 @@ class RAG(adal.Component):
         self.embedder = get_embedder(embedder_type=self.embedder_type)
         self.initialize_db_manager()
 
-        # Set up the output parser
-        data_parser = adal.DataClassParser(data_class=RAGAnswer, return_data_class=True)
-
-        # Format instructions to ensure proper output structure
-        format_instructions = data_parser.get_output_format_str() + """
-
-IMPORTANT FORMATTING RULES:
-1. DO NOT include your thinking or reasoning process in the output
-2. Provide only the final, polished answer
-3. DO NOT include ```markdown fences at the beginning or end of your answer
-4. DO NOT wrap your response in any kind of fences
-5. Start your response directly with the content
-6. The content will already be rendered as markdown
-7. Do not use backslashes before special characters like [ ] { } in your answer
-8. When listing tags or similar items, write them as plain text without escape characters
-9. For pipe characters (|) in text, write them directly without escaping them"""
-
-        # Get model configuration based on provider and model
-        from api.config import get_model_config
-        generator_config = get_model_config(self.provider, self.model)
-
-        # Set up the main generator
-        self.generator = adal.Generator(
-            template=RAG_TEMPLATE,
-            prompt_kwargs={
-                "output_format_str": format_instructions,
-                "conversation_history": self.memory(),
-                "system_prompt": system_prompt,
-                "contexts": None,
-            },
-            model_client=generator_config["model_client"](),
-            model_kwargs=generator_config["model_kwargs"],
-            output_processors=data_parser,
-        )
-
-
     def initialize_db_manager(self):
         """Initialize the database manager with local storage"""
         self.db_manager = DatabaseManager()
