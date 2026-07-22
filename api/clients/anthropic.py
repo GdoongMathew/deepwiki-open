@@ -1,0 +1,129 @@
+from typing import Any, Dict, Optional
+
+import backoff
+from adalflow.core.types import ModelType
+from adalflow.core.model_client import ModelClient
+
+from anthropic import (
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
+    UnprocessableEntityError,
+    BadRequestError,
+)
+
+
+class AnthropicBedrockClient(ModelClient):
+
+    def __init__(
+            self,
+            aws_access_key_id: str | None = None,
+            aws_secret_access_key: str | None = None,
+            aws_session_token: str | None = None,
+            aws_region: str | None = None,
+            **kwargs,
+    ):
+        super().__init__()
+        self._aws_client_kwargs = dict(
+            aws_access_key=aws_access_key_id,
+            aws_secret_key=aws_secret_access_key,
+            aws_session_token=aws_session_token,
+            aws_region=aws_region,
+        )
+
+    def init_sync_client(self):
+        from anthropic import AnthropicBedrock
+
+        return AnthropicBedrock(**self._aws_client_kwargs)
+
+    def init_async_client(self):
+        from anthropic import AsyncAnthropicBedrock
+
+        return AsyncAnthropicBedrock(**self._aws_client_kwargs)
+
+    @property
+    def async_client(self):
+        if not hasattr(self, '_async_client') or self._async_client is None:
+            self._async_client = self.init_async_client()
+        return self._async_client
+
+    @async_client.setter
+    def async_client(self, value):
+        self._async_client = value
+
+    @property
+    def sync_client(self):
+        if not hasattr(self, '_sync_client') or self._sync_client is None:
+            self._sync_client = self.init_sync_client()
+        return self._sync_client
+
+    @sync_client.setter
+    def sync_client(self, value):
+        self._sync_client = value
+
+    def convert_inputs_to_api_kwargs(
+        self,
+        input: Optional[Any] = None,
+        model_kwargs: Dict | None = None,
+        model_type: ModelType = ModelType.UNDEFINED,
+    ) -> Dict:
+
+        final_model_kwargs = model_kwargs.copy() if model_kwargs else {}
+        if model_type == ModelType.LLM:
+            if isinstance(input, str):
+                input = [{"role": "user", "content": input}]
+            elif not isinstance(input, list):
+                raise ValueError(f"input must be a string or a list or messages, get {type(input).__name__}")
+            final_model_kwargs["messages"] = input
+            return final_model_kwargs
+
+        raise ValueError(f"model_type {model_type} is not supported")
+
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            APITimeoutError,
+            InternalServerError,
+            RateLimitError,
+            UnprocessableEntityError,
+            BadRequestError,
+        ),
+        max_time=5,
+    )
+    def call(self, api_kwargs: dict | None = None, model_type: ModelType | None = None) -> Any:
+        api_kwargs = api_kwargs or {}
+        if model_type != ModelType.LLM:
+            raise ValueError(f"model_type {model_type} is not supported")
+
+        if "model" not in api_kwargs:
+            raise ValueError(f"must provide 'model' parameter in api_kwargs")
+
+        return self.sync_client.messages.create(**api_kwargs)
+
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            APITimeoutError,
+            InternalServerError,
+            RateLimitError,
+            UnprocessableEntityError,
+            BadRequestError,
+        ),
+        max_time=5,
+    )
+    async def acall(self, api_kwargs: dict | None = None, model_type: ModelType | None = None) -> Any:
+        api_kwargs = api_kwargs or {}
+        if model_type != ModelType.LLM:
+            raise ValueError(f"model_type {model_type} is not supported")
+
+        if "model" not in api_kwargs:
+            raise ValueError(f"must provide 'model' parameter in api_kwargs")
+
+        return await self.async_client.messages.create(**api_kwargs)
+
+    def to_dict(self, exclude: list[str] | None = None) -> dict[str, Any]:
+        return self._aws_client_kwargs
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(**data)

@@ -17,6 +17,7 @@ from api.clients import (
     OllamaClient,
     OpenAIClient,
     OpenRouterClient,
+    AnthropicBedrockClient,
 )
 
 # Get API keys from environment variables
@@ -71,7 +72,21 @@ CLIENT_CLASSES = {
     "OllamaClient": OllamaClient,
     "BedrockClient": BedrockClient,
     "AzureAIClient": AzureAIClient,
-    "DashscopeClient": DashscopeClient
+    "DashscopeClient": DashscopeClient,
+    AnthropicBedrockClient.__name__: AnthropicBedrockClient,
+}
+
+
+_DEFAULT_PROVIDER_MAP = {
+    "google": GoogleGenAIClient,
+    "openai": OpenAIClient,
+    "litellm": LiteLLMClient,
+    "openrouter": OpenRouterClient,
+    "ollama": OllamaClient,
+    "bedrock": BedrockClient,
+    "azure": AzureAIClient,
+    "dashscope": DashscopeClient,
+    "anthropic": AnthropicBedrockClient,
 }
 
 def replace_env_placeholders(config: Union[Dict[str, Any], List[Any], str, Any]) -> Union[Dict[str, Any], List[Any], str, Any]:
@@ -139,18 +154,8 @@ def load_generator_config():
             if provider_config.get("client_class") in CLIENT_CLASSES:
                 provider_config["model_client"] = CLIENT_CLASSES[provider_config["client_class"]]
             # Fall back to default mapping based on provider_id
-            elif provider_id in ["google", "openai", "openrouter", "ollama", "bedrock", "azure", "dashscope", "litellm"]:
-                default_map = {
-                    "google": GoogleGenAIClient,
-                    "openai": OpenAIClient,
-                    "litellm": LiteLLMClient,
-                    "openrouter": OpenRouterClient,
-                    "ollama": OllamaClient,
-                    "bedrock": BedrockClient,
-                    "azure": AzureAIClient,
-                    "dashscope": DashscopeClient
-                }
-                provider_config["model_client"] = default_map[provider_id]
+            elif provider_id in _DEFAULT_PROVIDER_MAP:
+                provider_config["model_client"] = _DEFAULT_PROVIDER_MAP[provider_id]
             else:
                 logger.warning(f"Unknown provider or client class: {provider_id}")
 

@@ -313,3 +313,44 @@ class GoogleGenerativeChatStreamer(ChatStreamer):
         async for chunk in response:
             if hasattr(chunk, "text"):
                 yield chunk.text
+
+
+class AnthropicChatStreamer(ChatStreamer):
+    provider = "anthropic"
+
+    def __init__(self, *, model: str, model_config: MODEL_CFG):
+        from ..clients.anthropic import AnthropicBedrockClient
+        from api.config import (
+            AWS_ACCESS_KEY_ID,
+            AWS_SECRET_ACCESS_KEY,
+            AWS_REGION,
+            AWS_SESSION_TOKEN,
+        )
+        self.client = AnthropicBedrockClient(
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_session_token=AWS_SESSION_TOKEN,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            aws_region=AWS_REGION,
+        )
+
+        self.model_kwargs = {
+            "model": model,
+            "max_tokens": model_config["max_tokens"],   # max_tokens must exist
+        }
+        for key in (
+            "temperature",
+            "top_p",
+        ):
+            if key in model_config:
+                self.model_kwargs[key] = model_config[key]
+
+    async def respond_stream(self, prompt: str) -> AsyncIterator[str]:
+        api_kwargs = self.client.convert_inputs_to_api_kwargs(
+            input=prompt,
+            model_kwargs=self.model_kwargs,
+            model_type=ModelType.LLM,
+        )
+
+        async with self.client.async_client.messages.stream(**api_kwargs) as stream:
+            async for chunk in stream.text_stream:
+                yield chunk

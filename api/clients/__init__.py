@@ -7,6 +7,7 @@ from adalflow.components.model_client import (
     OpenAIClient,
     GoogleGenAIClient,
 )
+from .anthropic import AnthropicBedrockClient
 from .bedrock import BedrockClient
 from .dashscope import DashscopeClient
 from .google_embedder import GoogleEmbedderClient
@@ -16,6 +17,7 @@ from .openrouter import OpenRouterClient
 
 __all__ = [
     "AzureAIClient",
+    "AnthropicBedrockClient",
     "BedrockClient",
     "DashscopeClient",
     "GoogleEmbedderClient",
