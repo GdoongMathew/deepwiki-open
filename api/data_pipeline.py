@@ -8,6 +8,7 @@ import tiktoken
 import logging
 import base64
 import glob
+from pathlib import Path
 from adalflow.utils import get_adalflow_default_root_path
 from adalflow.core.db import LocalDB
 from api.config import configs, DEFAULT_EXCLUDED_DIRS, DEFAULT_EXCLUDED_FILES
@@ -191,20 +192,18 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
     doc_extensions = [".md", ".txt", ".rst", ".json", ".yaml", ".yml"]
 
     # Determine filtering mode: inclusion or exclusion
-    use_inclusion_mode = (included_dirs is not None and len(included_dirs) > 0) or (included_files is not None and len(included_files) > 0)
+    use_inclusion_mode = bool(included_dirs or included_files)
 
     if use_inclusion_mode:
         # Inclusion mode: only process specified directories and files
-        final_included_dirs = set(included_dirs) if included_dirs else set()
-        final_included_files = set(included_files) if included_files else set()
+        included_dirs = list(set(included_dirs)) if included_dirs else list()
+        included_files = list(set(included_files)) if included_files else list()
 
         logger.info(f"Using inclusion mode")
-        logger.info(f"Included directories: {list(final_included_dirs)}")
-        logger.info(f"Included files: {list(final_included_files)}")
+        logger.info(f"Included directories: {included_dirs}")
+        logger.info(f"Included files: {included_files}")
 
         # Convert to lists for processing
-        included_dirs = list(final_included_dirs)
-        included_files = list(final_included_files)
         excluded_dirs = []
         excluded_files = []
     else:
@@ -308,78 +307,55 @@ def read_all_documents(path: str, embedder_type: str = None, is_ollama_embedder:
 
             return not is_excluded
 
-    # Process code files first
-    for ext in code_extensions:
-        files = glob.glob(f"{path}/**/*{ext}", recursive=True)
-        for file_path in files:
-            # Check if file should be processed based on inclusion/exclusion rules
-            if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
-                continue
-
+    for file_path in filter(
+        lambda p: should_process_file(
+            p,
+            use_inclusion=use_inclusion_mode,
+            included_dirs=included_dirs,
+            included_files=included_files,
+            excluded_dirs=excluded_dirs,
+            excluded_files=excluded_files,
+        ),
+            filter(
+                lambda p: p.suffix.lower() in code_extensions + doc_extensions,
+                Path(path).rglob(pattern="**/*"),
+            ),
+    ):
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                    relative_path = os.path.relpath(file_path, path)
+                relative_path = os.path.relpath(file_path, path)
 
-                    # Determine if this is an implementation file
+                # Check token count
+                token_count = count_tokens(content, embedder_type)
+                if token_count > MAX_EMBEDDING_TOKENS * 10:
+                    logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
+                    continue
+
+                file_ext = file_path.suffix.lower()
+                is_code = file_ext in code_extensions
+                # Determine if this is an implementation file
+                if is_code:
                     is_implementation = (
                         not relative_path.startswith("test_")
                         and not relative_path.startswith("app_")
                         and "test" not in relative_path.lower()
                     )
+                else:
+                    is_implementation = False
 
-                    # Check token count
-                    token_count = count_tokens(content, embedder_type)
-                    if token_count > MAX_EMBEDDING_TOKENS * 10:
-                        logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
-                        continue
-
-                    doc = Document(
-                        text=content,
-                        meta_data={
-                            "file_path": relative_path,
-                            "type": ext[1:],
-                            "is_code": True,
-                            "is_implementation": is_implementation,
-                            "title": relative_path,
-                            "token_count": token_count,
-                        },
-                    )
-                    documents.append(doc)
-            except Exception as e:
-                logger.error(f"Error reading {file_path}: {e}")
-
-    # Then process documentation files
-    for ext in doc_extensions:
-        files = glob.glob(f"{path}/**/*{ext}", recursive=True)
-        for file_path in files:
-            # Check if file should be processed based on inclusion/exclusion rules
-            if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
-                continue
-
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    relative_path = os.path.relpath(file_path, path)
-
-                    # Check token count
-                    token_count = count_tokens(content, embedder_type)
-                    if token_count > MAX_EMBEDDING_TOKENS:
-                        logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
-                        continue
-
-                    doc = Document(
-                        text=content,
-                        meta_data={
-                            "file_path": relative_path,
-                            "type": ext[1:],
-                            "is_code": False,
-                            "is_implementation": False,
-                            "title": relative_path,
-                            "token_count": token_count,
-                        },
-                    )
-                    documents.append(doc)
+                doc = Document(
+                    text=content,
+                    meta_data={
+                        "file_path": relative_path,
+                        "type": file_ext,
+                        "is_code": is_code,
+                        "is_implementation": is_implementation,
+                        "title": relative_path,
+                        "token_count": token_count,
+                    },
+                )
+                documents.append(doc)
             except Exception as e:
                 logger.error(f"Error reading {file_path}: {e}")
 
