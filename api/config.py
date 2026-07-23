@@ -64,15 +64,15 @@ CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
 
 # Client class mapping
 CLIENT_CLASSES = {
-    "GoogleGenAIClient": GoogleGenAIClient,
-    "GoogleEmbedderClient": GoogleEmbedderClient,
-    "OpenAIClient": OpenAIClient,
-    "LiteLLMClient" : LiteLLMClient,
-    "OpenRouterClient": OpenRouterClient,
-    "OllamaClient": OllamaClient,
-    "BedrockClient": BedrockClient,
-    "AzureAIClient": AzureAIClient,
-    "DashscopeClient": DashscopeClient,
+    GoogleGenAIClient.__name__: GoogleGenAIClient,
+    GoogleEmbedderClient.__name__: GoogleEmbedderClient,
+    OpenAIClient.__name__: OpenAIClient,
+    LiteLLMClient.__name__: LiteLLMClient,
+    OpenRouterClient.__name__: OpenRouterClient,
+    OllamaClient.__name__: OllamaClient,
+    BedrockClient.__name__: BedrockClient,
+    AzureAIClient.__name__: AzureAIClient,
+    DashscopeClient.__name__: DashscopeClient,
     AnthropicBedrockClient.__name__: AnthropicBedrockClient,
 }
 
