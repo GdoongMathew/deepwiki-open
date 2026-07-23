@@ -23,6 +23,43 @@ class AnthropicBedrockClient(ModelClient):
             aws_region: str | None = None,
             **kwargs,
     ):
+        """ A client wrapper for interacting with Anthropic Bedrock API.
+
+        This class currently only provides chat completion API calls.
+
+        Parameters
+        ----------
+        aws_access_key_id: str, optional.
+            AWS access key ID. Defaults to None.
+        aws_secret_access_key: str, optional.
+            AWS secret access key. Defaults to None.
+        aws_session_token: str, optional.
+            AWS session token. Defaults to None.
+        aws_region: str, optional.
+            AWS region. Defaults to None.
+
+        Examples
+        --------
+        .. code-block:: python
+            from api.clients import AnthropicBedrockClient
+            client = AnthropicBedrockClient()
+
+            # chat completion API
+            api_kwargs = client.convert_inputs_to_api_kwargs(
+                inputs="Hello World!",
+                model_kwargs={"max_tokens": 2048},
+                model_type=ModelType.LLM,
+            )
+            response = client.call(**api_kwargs, model_type=ModelType.LLM)
+
+            # asynchronous API calls
+            response = await client.async_call(**api_kwargs)
+
+        References
+        ----------
+        1. https://platform.claude.com/docs/zh-TW/build-with-claude/claude-in-amazon-bedrock
+
+        """
         super().__init__()
         self._aws_client_kwargs = dict(
             aws_access_key=aws_access_key_id,
@@ -49,6 +86,9 @@ class AnthropicBedrockClient(ModelClient):
 
     @async_client.setter
     def async_client(self, value):
+        from anthropic import AsyncAnthropicBedrock
+        if value is None and isinstance(getattr(self, "_async_client", None), AsyncAnthropicBedrock):
+            self.async_client.close()
         self._async_client = value
 
     @property
@@ -59,6 +99,9 @@ class AnthropicBedrockClient(ModelClient):
 
     @sync_client.setter
     def sync_client(self, value):
+        from anthropic import AnthropicBedrock
+        if value is None and isinstance(getattr(self, "_sync_client", None), AnthropicBedrock):
+            self.sync_client.close()
         self._sync_client = value
 
     def convert_inputs_to_api_kwargs(
