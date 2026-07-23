@@ -228,6 +228,37 @@ files = [
 ]
 
 [[package]]
+name = "anthropic"
+version = "0.117.1"
+description = "The official Python library for the anthropic API"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "anthropic-0.117.1-py3-none-any.whl", hash = "sha256:7ab79e2c33c3dbde54c5800c4d535821e1c6d80bdf7de83ae1c0328bae563b76"},
+    {file = "anthropic-0.117.1.tar.gz", hash = "sha256:e015a2d5b99fdf0aecac246e24ddb40d7bf93f9fe5b198771fab1559fb0101b9"},
+]
+
+[package.dependencies]
+anyio = ">=3.5.0,<5"
+distro = ">=1.7.0,<2"
+docstring-parser = ">=0.15,<1"
+httpx = ">=0.25.0,<1"
+jiter = ">=0.4.0,<1"
+pydantic = ">=1.9.0,<3"
+sniffio = "*"
+typing-extensions = ">=4.14,<5"
+
+[package.extras]
+aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9,<1)"]
+aws = ["boto3 (>=1.28.57)", "botocore (>=1.31.57)"]
+bedrock = ["boto3 (>=1.28.57)", "botocore (>=1.31.57)"]
+google-cloud = ["google-auth[requests] (>=2,<3)"]
+mcp = ["mcp (>=1.0) ; python_version >= \"3.10\""]
+vertex = ["google-auth[requests] (>=2,<3)"]
+webhooks = ["standardwebhooks (>=1.0.1,<2)"]
+
+[[package]]
 name = "anyio"
 version = "4.11.0"
 description = "High-level concurrency and networking framework on top of asyncio or Trio"
@@ -740,6 +771,23 @@ files = [
     {file = "distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2"},
     {file = "distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed"},
 ]
+
+[[package]]
+name = "docstring-parser"
+version = "0.18.0"
+description = "Parse Python docstrings in reST, Google and Numpydoc format"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b"},
+    {file = "docstring_parser-0.18.0.tar.gz", hash = "sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015"},
+]
+
+[package.extras]
+dev = ["pre-commit (>=2.16.0) ; python_version >= \"3.9\"", "pydoctor (>=25.4.0)", "pytest"]
+docs = ["pydoctor (>=25.4.0)"]
+test = ["pytest"]
 
 [[package]]
 name = "faiss-cpu"
@@ -3404,4 +3452,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "6ba5b45f26d528b886a8c74acebcdc4241bb7ff19474c040244f446bb6d9e784"
+content-hash = "86ee62820be3180e14bcd1bb48607994e24ba6648e13a346b8cee26fcdc89a06"
