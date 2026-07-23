@@ -41,7 +41,9 @@ class AnthropicBedrockClient(ModelClient):
         Examples
         --------
         .. code-block:: python
+
             from api.clients import AnthropicBedrockClient
+            from adalflow.core.types import ModelType
             client = AnthropicBedrockClient()
 
             # chat completion API
@@ -50,14 +52,16 @@ class AnthropicBedrockClient(ModelClient):
                 model_kwargs={"max_tokens": 2048},
                 model_type=ModelType.LLM,
             )
+
+            # synchronous API call
             response = client.call(**api_kwargs, model_type=ModelType.LLM)
 
-            # asynchronous API calls
-            response = await client.async_call(**api_kwargs)
+            # asynchronous API call
+            response = await client.acall(**api_kwargs, model_type=ModelType.LLM)
 
         References
         ----------
-        1. https://platform.claude.com/docs/zh-TW/build-with-claude/claude-in-amazon-bedrock
+        - [AWS Bedrock API Documentation](https://platform.claude.com/docs/zh-TW/build-with-claude/claude-in-amazon-bedrock#making-your-first-request)
 
         """
         super().__init__()
@@ -80,7 +84,7 @@ class AnthropicBedrockClient(ModelClient):
 
     @property
     def async_client(self):
-        if not hasattr(self, '_async_client') or self._async_client is None:
+        if getattr(self, "_async_client", None) is None:
             self._async_client = self.init_async_client()
         return self._async_client
 
@@ -93,7 +97,7 @@ class AnthropicBedrockClient(ModelClient):
 
     @property
     def sync_client(self):
-        if not hasattr(self, '_sync_client') or self._sync_client is None:
+        if getattr(self, "_sync_client", None) is None:
             self._sync_client = self.init_sync_client()
         return self._sync_client
 
