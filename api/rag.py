@@ -42,8 +42,9 @@ from adalflow.components.retriever.faiss_retriever import FAISSRetriever
 from api.config import configs
 from api.data_pipeline import DatabaseManager
 
-# Configure logging
-logger = logging.getLogger(__name__)
+from api.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Maximum token limit for embedding models
 MAX_INPUT_TOKENS = 7500  # Safe threshold below 8192 token limit

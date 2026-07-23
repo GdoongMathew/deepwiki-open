@@ -1,5 +1,4 @@
 import os
-import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -9,7 +8,7 @@ from datetime import datetime
 import asyncio
 
 # Configure logging
-from api.logging_config import setup_logging
+from api.logger import get_logger
 from api.schemas import (
     AuthorizationConfig,
     ModelConfig,
@@ -22,8 +21,7 @@ from api.schemas import (
     ProcessedProjectEntry,
 )
 
-setup_logging()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Initialize FastAPI app

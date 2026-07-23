@@ -1,11 +1,9 @@
 """OpenRouter ModelClient integration."""
 
-from typing import Dict, Sequence, Optional, Any, List
-import logging
+from typing import Dict, Any
 import json
 import aiohttp
-import requests
-from requests.exceptions import RequestException, Timeout
+from requests.exceptions import RequestException
 
 from adalflow.core.model_client import ModelClient
 from adalflow.core.types import (
@@ -14,7 +12,9 @@ from adalflow.core.types import (
     GeneratorOutput,
 )
 
-log = logging.getLogger(__name__)
+from api.logger import get_logger
+log = get_logger(__name__)
+
 
 class OpenRouterClient(ModelClient):
     __doc__ = r"""A component wrapper for the OpenRouter API client.

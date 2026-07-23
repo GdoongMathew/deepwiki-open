@@ -5,9 +5,7 @@ import os
 import subprocess
 import json
 import tiktoken
-import logging
 import base64
-import glob
 from pathlib import Path
 from adalflow.utils import get_adalflow_default_root_path
 from adalflow.core.db import LocalDB
@@ -17,9 +15,9 @@ import requests
 from requests.exceptions import RequestException
 
 from api.tools.embedder import get_embedder
+from api.logger import get_logger
 
-# Configure logging
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Maximum token limit for OpenAI embedding models
 MAX_EMBEDDING_TOKENS = 8192

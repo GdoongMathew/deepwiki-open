@@ -1,4 +1,3 @@
-import logging
 from abc import abstractmethod, ABC
 
 from typing import TYPE_CHECKING
@@ -13,6 +12,7 @@ from api.config import (
     AWS_SECRET_ACCESS_KEY,
     LITELLM_API_KEY,
 )
+from api.logger import get_logger
 
 if TYPE_CHECKING:
     from ollama import ChatResponse
@@ -22,12 +22,7 @@ if TYPE_CHECKING:
 
 MODEL_CFG = dict[str, str | int | float]
 
-# Configure logging
-from api.logging_config import setup_logging
-
-setup_logging()
-logger = logging.getLogger(__name__)
-
+logger = get_logger("chat")
 
 class ChatStreamer(ABC):
     _registry: dict[str, type["ChatStreamer"]] = {}

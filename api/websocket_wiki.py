@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections.abc import AsyncIterator, Callable
 from functools import partial
 
@@ -19,12 +18,9 @@ from api.prompts import (
     SIMPLE_CHAT_SYSTEM_PROMPT,
 )
 from api.schemas import ChatCompletionRequest
+from api.logger import get_logger
 
-# Configure logging
-from api.logging_config import setup_logging
-
-setup_logging()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def handle_websocket_chat(websocket: WebSocket):

@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 from typing import List, Union, Dict, Any
 
-logger = logging.getLogger(__name__)
 
 from api.clients import (
     AzureAIClient,
@@ -19,6 +18,11 @@ from api.clients import (
     OpenRouterClient,
     AnthropicBedrockClient,
 )
+
+from api.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 # Get API keys from environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')

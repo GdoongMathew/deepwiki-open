@@ -1,0 +1,101 @@
+from pathlib import Path
+from typing import Any
+import logging
+import logging.config
+import os
+import sys
+import json
+
+__all__ = ["get_logger", "setup_logging"]
+
+formatter = logging.Formatter(
+    fmt="%(asctime)s - %(levelname)s - %(name)s - %(filename)s:%(lineno)d - %(message)s"
+)
+
+
+def get_logger(name: str | None = None) -> logging.Logger:
+    """Get a logger instance with a specific name in `deepwiki` namespace.
+
+    the default handler is `StreamHandler` with format `%(asctime)s - %(levelname)-8s - %(name)-12s - %(message)s`.
+
+    Parameters
+    ----------
+    name: Optional[str]
+        The name of the logger. default=None.
+
+    Returns
+    -------
+    logging.Logger
+        A logger instance with the specific name.
+
+    """
+    logger = logging.getLogger("deepwiki")
+    if name:
+        logger = logger.getChild(name)
+
+    return logger
+
+
+def _default_log_config(
+        path: str | None = None,
+        max_bytes: int = 10485760,  # 10MB
+        backup_count: int = 5,
+) -> dict[str, Any]:
+    handlers: dict[str, dict[str, str | int]] = {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "default",
+            "stream": "ext://sys.stdout",
+        },
+    }
+    if path is not None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        handlers["ps_file"] = {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "INFO",
+            "formatter": "default",
+            "filename": path,
+            "maxBytes": max_bytes,
+            "backupCount": backup_count,
+            "encoding": "utf-8",
+        }
+    loggers = {
+        "deepwiki": {
+            "handlers": list(handlers.keys()),
+            "level": "INFO",
+        },
+    }
+
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(levelname)s - %(name)s - %(filename)s:%(lineno)d - %(message)s",
+            },
+        },
+        "handlers": handlers,
+        "loggers": loggers,
+    }
+
+
+
+def setup_logging() -> None:
+    cfg_path = os.path.join(os.getcwd(), "log_cfg.json")
+    if os.path.isfile(cfg_path):
+        print(f"loading config from {cfg_path}")
+        with open(cfg_path, "r") as f:
+            log_cfg = json.load(f)
+    else:
+        log_file = os.getenv("LOG_FILE_PATH", (Path(__file__).parent / "logs" / "application.log").as_posix())
+        log_cfg = _default_log_config(
+            log_file,
+            max_bytes=int(os.getenv("LOG_MAX_SIZE", 10)) * 1024 * 1024,
+            backup_count=int(os.getenv("LOG_BACKUP_COUNT", 5)),
+        )
+
+    logging.config.dictConfig(log_cfg)
+
+

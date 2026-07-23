@@ -1,21 +1,17 @@
 """AWS Bedrock ModelClient integration."""
 
-import os
 import json
-import logging
 import boto3
 import botocore
 import backoff
-from typing import Dict, Any, Optional, List, Generator, Union, AsyncGenerator, Sequence
+from typing import Dict, Any, Optional, List, Sequence
 
 from adalflow.core.model_client import ModelClient
-from adalflow.core.types import ModelType, GeneratorOutput, EmbedderOutput
+from adalflow.core.types import ModelType, EmbedderOutput
 
 # Configure logging
-from api.logging_config import setup_logging
-
-setup_logging()
-log = logging.getLogger(__name__)
+from api.logger import get_logger
+log = get_logger(__name__)
 
 class BedrockClient(ModelClient):
     __doc__ = r"""A component wrapper for the AWS Bedrock API client.

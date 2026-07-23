@@ -1,9 +1,6 @@
-from api.logging_config import setup_logging
-from logging import getLogger
+from api.logger import get_logger
 
-setup_logging()
-logger = getLogger(__name__)
-
+logger = get_logger("chat")
 
 def prompt_builder(
         system_prompt: str,

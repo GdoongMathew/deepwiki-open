@@ -20,10 +20,9 @@ from api.prompts import (
 from api.schemas import ChatCompletionRequest
 
 # Configure logging
-from api.logging_config import setup_logging
+from api.logger import get_logger
 
-setup_logging()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Initialize FastAPI app

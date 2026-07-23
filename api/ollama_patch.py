@@ -1,12 +1,9 @@
-import logging
-
 import os
 
 # Configure logging
-from api.logging_config import setup_logging
+from api.logger import get_logger
 
-setup_logging()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class OllamaModelNotFoundError(Exception):
     """Custom exception for when Ollama model is not found"""

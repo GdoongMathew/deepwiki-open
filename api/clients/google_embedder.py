@@ -1,9 +1,8 @@
 """Google AI Embeddings ModelClient integration."""
 
 import os
-import logging
 import backoff
-from typing import Dict, Any, Optional, List, Sequence
+from typing import Dict, Any, Optional, Sequence
 
 from adalflow.core.model_client import ModelClient
 from adalflow.core.types import ModelType, EmbedderOutput
@@ -14,7 +13,8 @@ try:
 except ImportError:
     raise ImportError("google-generativeai is required. Install it with 'pip install google-generativeai'")
 
-log = logging.getLogger(__name__)
+from api.logger import get_logger
+log = get_logger(__name__)
 
 
 class GoogleEmbedderClient(ModelClient):
