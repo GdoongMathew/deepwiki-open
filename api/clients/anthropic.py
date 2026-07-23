@@ -85,8 +85,6 @@ class AnthropicBedrockClient(ModelClient):
             APITimeoutError,
             InternalServerError,
             RateLimitError,
-            UnprocessableEntityError,
-            BadRequestError,
         ),
         max_time=5,
     )

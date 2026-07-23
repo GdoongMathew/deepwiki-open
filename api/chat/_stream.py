@@ -335,6 +335,7 @@ class AnthropicChatStreamer(ChatStreamer):
 
         self.model_kwargs = {
             "model": model,
+            "stream": True,
             "max_tokens": model_config["max_tokens"],   # max_tokens must exist
         }
         for key in (
@@ -351,6 +352,10 @@ class AnthropicChatStreamer(ChatStreamer):
             model_type=ModelType.LLM,
         )
 
-        async with self.client.async_client.messages.stream(**api_kwargs) as stream:
-            async for chunk in stream.text_stream:
-                yield chunk
+        response = await self.client.acall(
+            api_kwargs=api_kwargs,
+            model_type=ModelType.LLM,
+        )
+        async for chunk in response:
+            if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
+                yield chunk.delta.text
