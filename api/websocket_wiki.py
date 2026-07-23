@@ -82,12 +82,10 @@ async def handle_websocket_chat(websocket: WebSocket):
             if "No valid documents with embeddings found" in str(e):
                 logger.error(f"No valid embeddings found: {str(e)}")
                 await websocket.send_text("Error: No valid document embeddings found. This may be due to embedding size inconsistencies or API errors during document processing. Please try again or check your repository content.")
-                await websocket.close()
                 return
             else:
                 logger.error(f"ValueError preparing retriever: {str(e)}")
                 await websocket.send_text(f"Error preparing retriever: {str(e)}")
-                await websocket.close()
                 return
         except Exception as e:
             logger.error(f"Error preparing retriever: {str(e)}")
@@ -96,19 +94,16 @@ async def handle_websocket_chat(websocket: WebSocket):
                 await websocket.send_text("Error: Inconsistent embedding sizes detected. Some documents may have failed to embed properly. Please try again.")
             else:
                 await websocket.send_text(f"Error preparing retriever: {str(e)}")
-            await websocket.close()
             return
 
         # Validate request
         if not request.messages or len(request.messages) == 0:
             await websocket.send_text("Error: No messages provided")
-            await websocket.close()
             return
 
         last_message = request.messages[-1]
         if last_message.role != "user":
             await websocket.send_text("Error: Last message must be from the user")
-            await websocket.close()
             return
 
         # Process previous messages to build conversation history
@@ -320,7 +315,6 @@ async def handle_websocket_chat(websocket: WebSocket):
 
         async for chunk in stream_and_fallback(chat_streamer, prompt_func, simplified_prompt_func):
             await websocket.send_text(chunk)
-        await websocket.close()
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
@@ -328,6 +322,7 @@ async def handle_websocket_chat(websocket: WebSocket):
         logger.error(f"Error in WebSocket handler: {str(e)}")
         try:
             await websocket.send_text(f"Error: {str(e)}")
-            await websocket.close()
         except Exception:
             pass
+    finally:
+        await websocket.close()
