@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 import backoff
 from adalflow.core.types import ModelType
@@ -110,10 +110,10 @@ class AnthropicBedrockClient(ModelClient):
 
     def convert_inputs_to_api_kwargs(
         self,
-        input: Optional[Any] = None,
-        model_kwargs: Dict | None = None,
+        input: Any = None,
+        model_kwargs: dict | None = None,
         model_type: ModelType = ModelType.UNDEFINED,
-    ) -> Dict:
+    ) -> dict[str, Any]:
 
         final_model_kwargs = model_kwargs.copy() if model_kwargs else {}
         if model_type == ModelType.LLM:
@@ -170,5 +170,5 @@ class AnthropicBedrockClient(ModelClient):
         return self._aws_client_kwargs
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
+    def from_dict(cls, data: dict[str, Any]):
         return cls(**data)
