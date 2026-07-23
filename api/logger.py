@@ -3,20 +3,13 @@ from typing import Any
 import logging
 import logging.config
 import os
-import sys
 import json
 
 __all__ = ["get_logger", "setup_logging"]
 
-formatter = logging.Formatter(
-    fmt="%(asctime)s - %(levelname)s - %(name)s - %(filename)s:%(lineno)d - %(message)s"
-)
-
 
 def get_logger(name: str | None = None) -> logging.Logger:
     """Get a logger instance with a specific name in `deepwiki` namespace.
-
-    the default handler is `StreamHandler` with format `%(asctime)s - %(levelname)-8s - %(name)-12s - %(message)s`.
 
     Parameters
     ----------
