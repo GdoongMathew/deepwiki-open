@@ -40,7 +40,7 @@ function parseSseFrame(frame: string): SseFrame | null {
  * failure so the caller can decide whether to abort or fall back to on-demand
  * indexing inside the chat request.
  *
- * @param body     Request body: { repo_url, type, token?, provider, model, excluded_*/included_* }
+ * @param body     Request body: repo_url, type, token?, provider, model, excluded/included dirs and files.
  * @param onProgress  Optional callback invoked on each progress heartbeat.
  * @param signal   Optional AbortSignal to cancel the request.
  */
