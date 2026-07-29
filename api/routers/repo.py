@@ -8,6 +8,7 @@ from api.logger import get_logger
 from api.rag import repo_index_exist
 from api.repository import Repo
 from api.schemas import RepoPrepareRequest
+from api.services.research import prepare_repo_index as prepare_index
 
 logger = get_logger(__name__)
 
@@ -31,7 +32,7 @@ async def prepare_repo_index(request: RepoPrepareRequest):
         # First byte -> response headers are flushed now (kills the timeout).
         yield ": indexing-start\n\n"
 
-        task = asyncio.create_task(prepare_repo_index(request))
+        task = asyncio.create_task(prepare_index(request))
         elapsed = 0
         # Wait on the task, but wake up every interval to emit a heartbeat.
         while not task.done():
@@ -65,7 +66,7 @@ async def prepare_repo_index(request: RepoPrepareRequest):
     )
 
 
-@router.get("/repo/index/status")
+@router.get("/index/status")
 async def repo_index_status(
     repo_url: str = Query(..., description="Repository URL or local path"),
     type: str = Query("github", description="Repository type"),
