@@ -330,6 +330,90 @@ export default function RepoWikiPage() {
     return filePath;
   }, [effectiveRepoInfo, defaultBranch]);
 
+  // Post-process the LLM-generated wiki markdown to fix two recurring format
+  // issues that the prompt alone cannot reliably prevent:
+  //   1. Normalize the leading "Relevant source files" <details> block so it
+  //      always uses the exact, program-generated markdown. The model often
+  //      drops the links (rendering plain text) or appends bogus line numbers.
+  //   2. Resolve empty citation links `[file.ext:10-20]()` to real repository
+  //      URLs so they render as clickable links instead of dead ones.
+  const postProcessWikiContent = useCallback((content: string, filePaths: string[]): string => {
+    let processed = content;
+
+    // Escape the characters that would otherwise break a Markdown link label.
+    // File paths such as Next.js dynamic routes (src/app/[owner]/[repo]/page.tsx)
+    // contain '[' / ']' and MUST be escaped, or Markdown parses them as nested
+    // links and the citation renders as garbage.
+    const escapeLabel = (s: string) => s.replace(/([[\]])/g, '\\$1');
+
+    // Build the host-specific line anchor for an already-resolved file URL.
+    //   GitHub:    #L10-L20     (single: #L10)
+    //   GitLab:    #L10-20      (single: #L10)
+    //   Bitbucket: #lines-10:20 (single: #lines-10)
+    // Detect the host from the hostname only (mirroring generateFileUrl) so a
+    // repo/owner name that happens to contain another vendor's name in the URL
+    // path cannot cause a misclassification.
+    const lineAnchor = (url: string, start: string, end?: string): string => {
+      let hostname = '';
+      try {
+        hostname = new URL(url).hostname;
+      } catch {
+        hostname = '';
+      }
+      if (hostname.includes('github')) return end ? `#L${start}-L${end}` : `#L${start}`;
+      if (hostname.includes('gitlab')) return end ? `#L${start}-${end}` : `#L${start}`;
+      if (hostname.includes('bitbucket')) return end ? `#lines-${start}:${end}` : `#lines-${start}`;
+      return '';
+    };
+
+    // 1. Rebuild the <details> block from the known file list.
+    if (filePaths.length > 0) {
+      const detailsBlock = `<details>
+<summary>Relevant source files</summary>
+
+The following files were used as context for generating this wiki page:
+
+${filePaths.map(path => `- [${escapeLabel(path)}](${generateFileUrl(path)})`).join('\n')}
+</details>`;
+
+      const detailsRegex = /<details>\s*<summary>\s*Relevant source files\s*<\/summary>[\s\S]*?<\/details>/i;
+      if (detailsRegex.test(processed)) {
+        // Replace whatever the model produced, in place, with the canonical block.
+        processed = processed.replace(detailsRegex, detailsBlock);
+      } else {
+        // The model omitted the block entirely; prepend the canonical one.
+        processed = `${detailsBlock}\n\n${processed}`;
+      }
+    }
+
+    // 2. Resolve empty citation links `[path/to/file.ext:10-20]()` -> real URL.
+    //    Match ONLY against the known source-file paths (longest first, so the
+    //    most specific path wins). This is far safer than a generic `[...]()`
+    //    regex: malformed or nested brackets in the model output can no longer
+    //    be swallowed into a bogus label/URL, and paths containing '[' / ']'
+    //    are matched literally instead of tripping the Markdown parser.
+    if (filePaths.length > 0) {
+      const alternation = [...filePaths]
+        .sort((a, b) => b.length - a.length)
+        .map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('|');
+      const citationRegex = new RegExp(`\\[(${alternation})(?::(\\d+)(?:-(\\d+))?)?\\]\\(\\)`, 'g');
+      processed = processed.replace(citationRegex, (match, path: string, start: string, end: string) => {
+        const url = generateFileUrl(path);
+        // generateFileUrl returns the bare path for local repos / unresolved
+        // hosts; in that case there is no web URL to link to, so leave it as-is.
+        if (url === path) {
+          return match;
+        }
+        const linePart = start ? (end ? `:${start}-${end}` : `:${start}`) : '';
+        const anchor = start ? lineAnchor(url, start, end) : '';
+        return `[${escapeLabel(path)}${linePart}](${url}${anchor})`;
+      });
+    }
+
+    return processed;
+  }, [generateFileUrl]);
+
   // Memoize repo info to avoid triggering updates in callbacks
 
   // Add useEffect to handle scroll reset
@@ -439,11 +523,11 @@ You will be given:
 
 CRITICAL STARTING INSTRUCTION:
 The very first thing on the page MUST be a \`<details>\` block listing ALL the \`[RELEVANT_SOURCE_FILES]\` you used to generate the content. There MUST be AT LEAST 5 source files listed - if fewer were provided, you MUST find additional related files to include.
-Format it exactly like this:
+Do not provide any acknowledgements, disclaimers, apologies, or any other preface before the \`<details>\` block. JUST START with the \`<details>\` block.
+Format the block EXACTLY like the following template, reproducing it verbatim (do not add line numbers, do not convert the links to plain text, do not add any other text):
 <details>
 <summary>Relevant source files</summary>
 
-Remember, do not provide any acknowledgements, disclaimers, apologies, or any other preface before the \`<details>\` block. JUST START with the \`<details>\` block.
 The following files were used as context for generating this wiki page:
 
 ${filePaths.map(path => `- [${path}](${generateFileUrl(path)})`).join('\n')}
@@ -657,6 +741,9 @@ Remember:
         // Clean up markdown delimiters
         content = content.replace(/^```markdown\s*/i, '').replace(/```\s*$/i, '');
 
+        // Normalize the <details> block and resolve empty citation links.
+        content = postProcessWikiContent(content, filePaths);
+
         console.log(`Received content for ${page.title}, length: ${content.length} characters`);
 
         // Store the FINAL generated content
@@ -691,7 +778,7 @@ Remember:
         setLoadingMessage(undefined); // Clear specific loading message
       }
     });
-  }, [generatedPages, currentToken, effectiveRepoInfo, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, activeContentRequests, generateFileUrl]);
+  }, [generatedPages, currentToken, effectiveRepoInfo, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, activeContentRequests, generateFileUrl, postProcessWikiContent]);
 
   // Determine the wiki structure from repository data
   const determineWikiStructure = useCallback(async (fileTree: string, readme: string, owner: string, repo: string) => {
@@ -963,6 +1050,11 @@ IMPORTANT:
 
       let xmlText = xmlMatch[0];
       xmlText = xmlText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+      // Escape bare ampersands that are not part of a valid XML entity. A single
+      // unescaped '&' (very common in LLM-generated titles/descriptions such as
+      // "Frontend & Backend") makes strict text/xml parsing fail with a
+      // <parsererror>, which would otherwise drop the whole structure.
+      xmlText = xmlText.replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;');
       // Try parsing with DOMParser
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xmlText, "text/xml");
@@ -996,10 +1088,6 @@ IMPORTANT:
       // Parse pages using DOM
       pages = [];
 
-      if (parseError && (!pagesEls || pagesEls.length === 0)) {
-        console.warn('DOM parsing failed, trying regex fallback');
-      }
-
       pagesEls.forEach(pageEl => {
         const id = pageEl.getAttribute('id') || `page-${pages.length + 1}`;
         const titleEl = pageEl.querySelector('title');
@@ -1031,6 +1119,28 @@ IMPORTANT:
           relatedPages
         });
       });
+
+      // Regex fallback: strict text/xml parsing can still fail (or yield no
+      // <page> nodes) on malformed LLM output. Recover pages directly from the
+      // raw XML text so a parse hiccup does not produce an empty wiki.
+      if (pages.length === 0) {
+        console.warn('DOM parsing yielded no pages; using regex fallback');
+        const pageBlocks = xmlText.match(/<page\b[\s\S]*?<\/page>/g) || [];
+        pages = pageBlocks.map((block, i) => {
+          const pid = block.match(/<page\s+id="([^"]+)"/)?.[1] ?? `page-${i + 1}`;
+          const ptitle = block.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.trim() ?? '';
+          const imp = block.match(/<importance>([\s\S]*?)<\/importance>/)?.[1]?.trim();
+          const importance: 'high' | 'medium' | 'low' =
+            imp === 'high' ? 'high' : imp === 'low' ? 'low' : 'medium';
+          const filePaths = Array.from(
+            block.matchAll(/<file_path>([\s\S]*?)<\/file_path>/g),
+          ).map(m => m[1].trim()).filter(Boolean);
+          const relatedPages = Array.from(
+            block.matchAll(/<related>([\s\S]*?)<\/related>/g),
+          ).map(m => m[1].trim()).filter(Boolean);
+          return { id: pid, title: ptitle, content: '', filePaths, importance, relatedPages };
+        });
+      }
 
       // Extract sections if they exist in the XML
       const sections: WikiSection[] = [];
