@@ -411,6 +411,66 @@ ${filePaths.map(path => `- [${escapeLabel(path)}](${generateFileUrl(path)})`).jo
       });
     }
 
+    // 3. Resolve any REMAINING empty citation links that look like a repository
+    //    file path but were not in this page's filePaths. The model frequently
+    //    cites additional files it read (e.g. accelerator_connector.py) that were
+    //    never in the assigned list, leaving them as dead `[path:10-20]()` links.
+    //    The path token forbids brackets/whitespace/parens, so nested-bracket
+    //    edge cases are still avoided; bracketed paths (e.g. Next.js dynamic
+    //    routes) are already handled by the filePaths pass above.
+    const genericCitationRegex =
+      /\[([^[\]\s()]+?\.[A-Za-z0-9]+)(?::(\d+)(?:-(\d+))?)?\]\(\)/g;
+    processed = processed.replace(
+      genericCitationRegex,
+      (match, path: string, start: string, end: string) => {
+        const url = generateFileUrl(path);
+        if (url === path) {
+          return match; // local repo / unresolved host -> leave as-is
+        }
+        const linePart = start ? (end ? `:${start}-${end}` : `:${start}`) : '';
+        const anchor = start ? lineAnchor(url, start, end) : '';
+        return `[${escapeLabel(path)}${linePart}](${url}${anchor})`;
+      },
+    );
+
+    // 4. Resolve citations where the model put a "Sources:" prefix INSIDE the
+    //    bracket and/or used a bare filename instead of the full repo path, e.g.
+    //    `[Sources: fit_loop.py:56-104]()`. The bare name is mapped back to a
+    //    full path via this page's filePaths (by basename); the "Sources:" label
+    //    is moved outside the link to match the normal `Sources: [file](url)`
+    //    format. Unknown bare names are left untouched.
+    if (filePaths.length > 0) {
+      const byBasename = new Map<string, string>();
+      for (const p of filePaths) {
+        const base = p.split('/').pop() ?? p;
+        if (!byBasename.has(base)) byBasename.set(base, p);
+      }
+      const prefixedCitationRegex =
+        /\[(Sources?|Source):\s*([^[\]\s():]+?)(?::(\d+)(?:-(\d+))?)?\]\(\)/gi;
+      processed = processed.replace(
+        prefixedCitationRegex,
+        (match, prefix: string, token: string, start: string, end: string) => {
+          // token may already be a full path, or a bare basename to look up.
+          const fullPath = token.includes('/') ? token : byBasename.get(token);
+          if (!fullPath) {
+            return match; // unknown bare filename -> leave as-is
+          }
+          const url = generateFileUrl(fullPath);
+          if (url === fullPath) {
+            return match; // local repo / unresolved host
+          }
+          const linePart = start ? (end ? `:${start}-${end}` : `:${start}`) : '';
+          const anchor = start ? lineAnchor(url, start, end) : '';
+          return `${prefix}: [${escapeLabel(fullPath)}${linePart}](${url}${anchor})`;
+        },
+      );
+    }
+
+    // 5. Strip a redundant empty "()" left immediately after a completed link.
+    //    The model sometimes emits `[path](https://…)()` — a real link followed
+    //    by the citation template's empty parens — which renders a stray "()".
+    processed = processed.replace(/(\]\([^)\s]+\))\(\)/g, '$1');
+
     return processed;
   }, [generateFileUrl]);
 
@@ -594,7 +654,12 @@ Based ONLY on the content of the \`[RELEVANT_SOURCE_FILES]\`:
 6.  **Source Citations (EXTREMELY IMPORTANT):**
     *   For EVERY piece of significant information, explanation, diagram, table entry, or code snippet, you MUST cite the specific source file(s) and relevant line numbers from which the information was derived.
     *   Place citations at the end of the paragraph, under the diagram/table, or after the code snippet.
-    *   Use the exact format: \`Sources: [filename.ext:start_line-end_line]()\` for a range, or \`Sources: [filename.ext:line_number]()\` for a single line. Multiple files can be cited: \`Sources: [file1.ext:1-10](), [file2.ext:5](), [dir/file3.ext]()\` (if the whole file is relevant and line numbers are not applicable or too broad).
+    *   Use the EXACT format below, and ALWAYS use the FULL repository-relative path exactly as it appears in the "Relevant source files" list above — NEVER a bare filename (e.g. use \`src/lightning/pytorch/loops/fit_loop.py\`, not \`fit_loop.py\`):
+        *   Range: \`Sources: [src/full/path/file.ext:start_line-end_line]()\`
+        *   Single line: \`Sources: [src/full/path/file.ext:line_number]()\`
+        *   Multiple files: \`Sources: [src/full/path/a.ext:1-10](), [src/full/path/b.ext:5](), [src/full/path/c.ext]()\` (omit line numbers when the whole file is relevant).
+    *   The word \`Sources:\` MUST be placed BEFORE the opening bracket, never inside it (write \`Sources: [path]()\`, NOT \`[Sources: path]()\`).
+    *   Leave the parentheses \`()\` EMPTY — they are resolved into real links automatically. Do not put a URL inside them.
     *   If an entire section is overwhelmingly based on one or two files, you can cite them under the section heading in addition to more specific citations within the section.
     *   IMPORTANT: You MUST cite AT LEAST 5 different source files throughout the wiki page to ensure comprehensive coverage.
 
