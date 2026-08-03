@@ -1,5 +1,5 @@
 from api.schemas.auth import AuthorizationConfig
-from api.schemas.chat import ChatCompletionRequest
+from api.schemas.chat import ChatCompletionRequest, ChatMessage
 from api.schemas.codemap import (
     CodeMap,
     CodeMapCitation,
@@ -13,7 +13,13 @@ from api.schemas.models import (
     ModelConfig,
     Provider,
 )
-from api.schemas.repo import RepoInfo, RepoPrepareRequest
+from api.schemas.repo import (
+    RepoInfo,
+    RepoPrepareRequest,
+    WikiTaskRequest,
+    WikiTaskSubmitResult,
+    TaskStatus,
+)
 from api.schemas.wiki import (
     ProcessedProjectEntry,
     WikiCacheData,
@@ -22,11 +28,14 @@ from api.schemas.wiki import (
     WikiPage,
     WikiSection,
     WikiStructureModel,
+    WikiTaskSummary,
+    WikiTaskStatus,
 )
 
 __all__ = [
     "AuthorizationConfig",
     "ChatCompletionRequest",
+    "ChatMessage",
     "CodeMap",
     "CodeMapCitation",
     "CodeMapRequest",
@@ -44,6 +53,11 @@ __all__ = [
     "WikiPage",
     "WikiSection",
     "WikiStructureModel",
+    "WikiTaskRequest",
+    "WikiTaskSummary",
+    "WikiTaskStatus",
+    "WikiTaskSubmitResult",
+    "TaskStatus",
     "aload",
     "asave",
 ]
