@@ -21,12 +21,13 @@ from api.schemas import (
 from api.services.wiki import (
     delete_wiki_cache,
     export_wiki,
+    generate_repo_wiki,
     list_processed_projects,
     list_wiki_cache,
     read_wiki_cache,
+    registry,
+    WikiTask,
 )
-
-from api.services.wiki import generate_repo_wiki, WikiTask, registry
 
 logger = get_logger(__name__)
 
@@ -277,7 +278,7 @@ async def stream_wiki_task(task_id: str):
         while True:
             task = registry.get(task_id)
             if task is None:
-                yield "event: error\ndata: {'error': 'task no longer available'}\n\n"
+                yield 'event: error\ndata: {"error": "task no longer available"}\n\n'
                 return
 
             # we use wiki task status, so that frontend could show the current processing pages.
