@@ -9,6 +9,7 @@ from requests.exceptions import RequestException
 
 from api.logger import get_logger
 from api.utils import deepwiki_root
+from api.config import GITLAB_ACCESS_TOKEN
 
 logger = get_logger(__name__)
 
@@ -303,7 +304,9 @@ def get_repo_content(
     if repo_type == "github":
         return _get_github_file_content(repo_url, file_path, access_token)
     elif repo_type == "gitlab":
-        return _get_gitlab_file_content(repo_url, file_path, access_token)
+        return _get_gitlab_file_content(
+            repo_url, file_path, access_token or GITLAB_ACCESS_TOKEN
+        )
     elif repo_type == "bitbucket":
         return _get_bitbucket_file_content(repo_url, file_path, access_token)
     else:
@@ -501,9 +504,13 @@ class Repo:
     def download(self, force: bool = False) -> None:
         if force or (not self.downloaded and not self.is_local):
             os.makedirs(self.save_path, exist_ok=True)
-            download_repo(
-                self.repo_url, self.save_path, self.repo_type, self.access_token
-            )
+
+            # custom patching for private on-prem gitlab services
+            access_token = self.access_token
+            if self.repo_type == "gitlab" and not access_token:
+                access_token = GITLAB_ACCESS_TOKEN
+
+            download_repo(self.repo_url, self.save_path, self.repo_type, access_token)
 
     @property
     def save_path(self) -> str:

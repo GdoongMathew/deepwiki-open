@@ -36,6 +36,9 @@ AWS_SESSION_TOKEN = os.environ.get("AWS_SESSION_TOKEN")
 AWS_REGION = os.environ.get("AWS_REGION")
 AWS_ROLE_ARN = os.environ.get("AWS_ROLE_ARN")
 
+# private on-prem gitlab token
+GITLAB_ACCESS_TOKEN = os.environ.get("GITLAB_ACCESS_TOKEN")
+
 # Set keys in environment (in case they're needed elsewhere in the code)
 if OPENAI_API_KEY:
     os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
