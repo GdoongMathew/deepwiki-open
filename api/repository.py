@@ -1,6 +1,10 @@
 import os
 import subprocess
+from functools import wraps
+from collections.abc import Callable
 from urllib.parse import quote, urlparse, urlunparse
+
+from git import Repo as GitRepo, GIT_OK, GitCommandError
 
 from api.logger import get_logger
 from api.utils import deepwiki_root
@@ -12,120 +16,107 @@ logger = get_logger(__name__)
 CLONE_REPO_ROOT = os.path.join(deepwiki_root(), "repo")
 
 
-def download_repo(
-    repo_url: str, local_path: str, repo_type: str = None, access_token: str = None
-) -> str:
-    """
-    Downloads a Git repository (GitHub, GitLab, or Bitbucket) to a specified local path.
+def _exception_cleanup(func: Callable) -> Callable:
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (subprocess.CalledProcessError, GitCommandError) as e:
+            err_msg: str | bytes = e.stderr
+            if isinstance(err_msg, bytes):
+                err_msg = err_msg.decode("utf-8")
+            token = kwargs.get("access_token", None)
+            if token:
+                token_mask = "***TOKEN***"
+                err_msg = err_msg.replace(token, token_mask)
+                encoded_token = quote(token, safe="")
+                err_msg = err_msg.replace(encoded_token, token_mask)
+            raise ValueError(err_msg)
 
-    Args:
-        repo_type(str): Type of repository
-        repo_url (str): The URL of the Git repository to clone.
-        local_path (str): The local directory where the repository will be cloned.
-        access_token (str, optional): Access token for private repositories.
+    return wrapper
 
-    Returns:
-        str: The output message from the `git` command.
-    """
-    try:
-        # Check if Git is installed
-        logger.info(f"Preparing to clone repository to {local_path}")
-        subprocess.run(
-            ["git", "--version"],
-            check=True,
-            capture_output=True,
-        )
 
-        # Check if repository already exists
-        if os.path.exists(local_path) and os.listdir(local_path):
-            # Directory exists and is not empty
-            logger.warning(
-                f"Repository already exists at {local_path}. Using existing repository."
+@_exception_cleanup
+def _clone_from_gitlab(
+    remote_url: str,
+    local_path: str,
+    *,
+    access_token: str | None = None,
+    **kwargs,
+) -> GitRepo:
+    if access_token:
+        parsed = urlparse(remote_url)
+
+        remote_url = urlunparse(
+            (
+                parsed.scheme,
+                f"oauth2:{quote(access_token, safe="")}@{parsed.netloc}",
+                parsed.path,
+                "",
+                "",
+                "",
             )
-            return f"Using existing repository at {local_path}"
-
-        # Ensure the local path exists
-        os.makedirs(local_path, exist_ok=True)
-
-        # Prepare the clone URL with access token if provided
-        clone_url = repo_url
-        if access_token:
-            parsed = urlparse(repo_url)
-            # URL-encode the token to handle special characters
-            encoded_token = quote(access_token, safe="")
-            # Determine the repository type and format the URL accordingly
-            if repo_type == "github":
-                # Format: https://{token}@{domain}/owner/repo.git
-                # Works for both github.com and enterprise GitHub domains
-                clone_url = urlunparse(
-                    (
-                        parsed.scheme,
-                        f"{encoded_token}@{parsed.netloc}",
-                        parsed.path,
-                        "",
-                        "",
-                        "",
-                    )
-                )
-            elif repo_type == "gitlab":
-                # Format: https://oauth2:{token}@gitlab.com/owner/repo.git
-                clone_url = urlunparse(
-                    (
-                        parsed.scheme,
-                        f"oauth2:{encoded_token}@{parsed.netloc}",
-                        parsed.path,
-                        "",
-                        "",
-                        "",
-                    )
-                )
-            elif repo_type == "bitbucket":
-                # Bitbucket has two token formats with different auth schemes:
-                #   - HTTP access tokens (prefix "ATCTT") use x-bitbucket-api-token-auth
-                #   - App passwords (deprecated, EOL June 2026) use x-token-auth
-                # Detect by token prefix so existing app password users keep working.
-                if access_token.startswith("ATCTT"):
-                    auth_scheme = "x-bitbucket-api-token-auth"
-                else:
-                    auth_scheme = "x-token-auth"
-                # Format: https://{auth_scheme}:{token}@bitbucket.org/owner/repo.git
-                clone_url = urlunparse(
-                    (
-                        parsed.scheme,
-                        f"{auth_scheme}:{encoded_token}@{parsed.netloc}",
-                        parsed.path,
-                        "",
-                        "",
-                        "",
-                    )
-                )
-
-            logger.info("Using access token for authentication")
-
-        # Clone the repository
-        logger.info(f"Cloning repository from {repo_url} to {local_path}")
-        # We use repo_url in the log to avoid exposing the token in logs
-        result = subprocess.run(
-            ["git", "clone", "--depth=1", "--single-branch", clone_url, local_path],
-            check=True,
-            capture_output=True,
         )
+    return GitRepo.clone_from(url=remote_url, to_path=local_path, **kwargs)
 
-        logger.info("Repository cloned successfully")
-        return result.stdout.decode("utf-8")
 
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.decode("utf-8")
-        # Sanitize error message to remove any tokens (both raw and URL-encoded)
-        if access_token:
-            # Remove raw token
-            error_msg = error_msg.replace(access_token, "***TOKEN***")
-            # Also remove URL-encoded token to prevent leaking encoded version
-            encoded_token = quote(access_token, safe="")
-            error_msg = error_msg.replace(encoded_token, "***TOKEN***")
-        raise ValueError(f"Error during cloning: {error_msg}")
-    except Exception as e:
-        raise ValueError(f"An unexpected error occurred: {str(e)}")
+@_exception_cleanup
+def _clone_from_github(
+    remote_url: str,
+    local_path: str,
+    *,
+    access_token: str | None = None,
+    **kwargs,
+) -> GitRepo:
+    if access_token:
+        parsed = urlparse(remote_url)
+        access_token = quote(access_token, safe="")
+
+        remote_url = urlunparse(
+            (
+                parsed.scheme,
+                f"{access_token}@{parsed.netloc}",
+                parsed.path,
+                "",
+                "",
+                "",
+            )
+        )
+    return GitRepo.clone_from(url=remote_url, to_path=local_path, **kwargs)
+
+
+@_exception_cleanup
+def _clone_from_bitbucket(
+    remote_url: str,
+    local_path: str,
+    *,
+    access_token: str | None = None,
+    **kwargs,
+) -> GitRepo:
+    if access_token:
+        parsed = urlparse(remote_url)
+        # Bitbucket has two token formats with different auth schemes:
+        #   - HTTP access tokens (prefix "ATCTT") use x-bitbucket-api-token-auth
+        #   - App passwords (deprecated, EOL June 2026) use x-token-auth
+        # Detect by token prefix so existing app password users keep working.
+        auth_scheme = (
+            "x-bitbucket-api-token-auth"
+            if access_token.startswith("ATCTT")
+            else "x-token-auth"
+        )
+        access_token = quote(access_token, safe="")
+
+        remote_url = urlunparse(
+            (
+                parsed.scheme,
+                f"{auth_scheme}:{access_token}@{parsed.netloc}",
+                parsed.path,
+                "",
+                "",
+                "",
+            )
+        )
+    return GitRepo.clone_from(url=remote_url, to_path=local_path, **kwargs)
 
 
 def _path_is_url(path: str) -> bool:
@@ -202,12 +193,30 @@ class Repo:
         if force or (not self.downloaded and not self.is_local):
             os.makedirs(self.save_path, exist_ok=True)
 
-            # custom patching for private on-prem gitlab services
-            access_token = self.access_token
-            if self.repo_type == "gitlab" and not access_token:
-                access_token = GITLAB_ACCESS_TOKEN
+            if not GIT_OK:
+                raise RuntimeError("Missing `git` in current environment")
 
-            download_repo(self.repo_url, self.save_path, self.repo_type, access_token)
+            kwargs = {
+                "remote_url": self.repo_url,
+                "local_path": self.save_path,
+                "access_token": self.access_token,
+                "multi_options": ["--depth=1", "--single-branch"],
+            }
+
+            if self.repo_type == "github":
+                _clone_from_github(**kwargs)
+
+            elif self.repo_type == "gitlab":
+                if GITLAB_ACCESS_TOKEN and not self.access_token:
+                    kwargs["access_token"] = GITLAB_ACCESS_TOKEN
+                _clone_from_gitlab(**kwargs)
+
+            elif self.repo_type == "bitbucket":
+                _clone_from_bitbucket(**kwargs)
+            else:
+                raise NotImplementedError(f"Unknown repo type: {self.repo_type}")
+
+            logger.info("Repository %s cloned successfully", self.name)
 
     @property
     def save_path(self) -> str:
