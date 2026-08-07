@@ -8,6 +8,7 @@ from api.logger import get_logger
 from api.rag import repo_index_exist
 from api.repository import Repo
 from api.schemas import RepoPrepareRequest
+from api.services.repo_type import resolve_repo_type_from_env
 from api.services.research import prepare_repo_index as prepare_index
 
 logger = get_logger(__name__)
@@ -76,3 +77,16 @@ async def repo_index_status(
     Frontend can poll this instead of holding the /repo/prepare stream open.
     """
     return {"ready": repo_index_exist(Repo(repo_url=repo_url, repo_type=type))}
+
+
+@router.get("/resolve-type")
+async def resolve_repo_type(
+    url: str = Query(..., description="Repository URL or host to classify"),
+):
+    """Classify a repo URL as github / gitlab / bitbucket / web.
+
+    Applies server-only on-prem host overrides (ONPREM_*_HOSTS); the configured
+    host lists never leave the backend. The frontend uses this to default the
+    provider without shipping the host mapping to the browser.
+    """
+    return {"type": resolve_repo_type_from_env(url)}

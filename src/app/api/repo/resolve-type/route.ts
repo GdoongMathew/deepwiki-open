@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { parseHosts, resolveRepoTypeFromDomain } from '@/utils/repoType';
+// Thin proxy to the backend repo-type resolver. On-prem host overrides live in
+// the backend env (ONPREM_*_HOSTS) and are applied there; this route just
+// forwards and returns { type }. On failure the client falls back to its local
+// public-host heuristic (see fetchRepoType in src/utils/repoType.ts).
+const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8001';
 
-// Resolve a repository URL to a provider type, applying self-hosted (on-prem)
-// host overrides from SERVER-ONLY env vars. These host lists are intentionally
-// not `NEXT_PUBLIC_*`, so they are never inlined into the client bundle:
-//   ONPREM_GITHUB_HOSTS=github.company.com
-//   ONPREM_GITLAB_HOSTS=git.company.com,gitlab.corp.net
-//   ONPREM_BITBUCKET_HOSTS=stash.company.com
-// Read at request time, so changing them needs no rebuild.
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get('url') || '';
-  const type = resolveRepoTypeFromDomain(url, {
-    github: parseHosts(process.env.ONPREM_GITHUB_HOSTS),
-    gitlab: parseHosts(process.env.ONPREM_GITLAB_HOSTS),
-    bitbucket: parseHosts(process.env.ONPREM_BITBUCKET_HOSTS),
-  });
-  return NextResponse.json({ type });
+  try {
+    const res = await fetch(
+      `${TARGET_SERVER_BASE_URL}/repo/resolve-type?url=${encodeURIComponent(url)}`,
+    );
+    return new NextResponse(await res.text(), {
+      status: res.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    console.error('Error in /api/repo/resolve-type proxy:', error);
+    return new NextResponse(JSON.stringify({ error: 'Failed to resolve repo type' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 }
