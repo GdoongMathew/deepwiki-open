@@ -89,6 +89,4 @@ async def resolve_repo_type(
     host lists never leave the backend. The frontend uses this to default the
     provider without shipping the host mapping to the browser.
     """
-    repo_type = resolve_repo_type_from_env(url=url)
-    logger.info("url: %s, repo_type: %s", url, repo_type)
-    return {"type": repo_type}
+    return {"type": resolve_repo_type_from_env(url=url)}
