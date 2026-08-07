@@ -9,6 +9,7 @@ import Mermaid from '../components/Mermaid';
 import ConfigurationModal from '@/components/ConfigurationModal';
 import ProcessedProjects from '@/components/ProcessedProjects';
 import { extractUrlPath, extractUrlDomain } from '@/utils/urlDecoder';
+import { resolveRepoTypeFromDomain, isKnownProvider, fetchRepoType } from '@/utils/repoType';
 import { useProcessedProjects } from '@/hooks/useProcessedProjects';
 
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -121,6 +122,25 @@ export default function Home() {
     }
   }, []);
 
+  // ①: keep the platform toggle in sync with the typed repository URL, so an
+  // on-prem GitLab/Bitbucket defaults to the right provider without the user
+  // manually switching. Resolution is done server-side (fetchRepoType) so the
+  // configured on-prem host lists never ship to the browser. Non-URL / local
+  // paths are skipped and leave the current selection untouched.
+  useEffect(() => {
+    const input = repositoryInput.trim();
+    if (!extractUrlDomain(input)) return; // local path / not a URL
+    let cancelled = false;
+    fetchRepoType(input).then(detected => {
+      if (!cancelled && isKnownProvider(detected)) {
+        setSelectedPlatform(detected);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [repositoryInput]);
+
   // Provider-based model selection state
   const [provider, setProvider] = useState<string>('');
   const [model, setModel] = useState<string>('');
@@ -204,17 +224,8 @@ export default function Home() {
       owner = 'local';
     }
     else if (customGitRegex.test(input)) {
-      // Detect repository type based on domain
-      const domain = extractUrlDomain(input);
-      if (domain?.includes('github.com')) {
-        type = 'github';
-      } else if (domain?.includes('gitlab.com') || domain?.includes('gitlab.')) {
-        type = 'gitlab';
-      } else if (domain?.includes('bitbucket.org') || domain?.includes('bitbucket.')) {
-        type = 'bitbucket';
-      } else {
-        type = 'web'; // fallback for other git hosting services
-      }
+      // Detect repository type based on domain (honours configured on-prem hosts).
+      type = resolveRepoTypeFromDomain(extractUrlDomain(input));
 
       fullPath = extractUrlPath(input)?.replace(/\.git$/, '');
       const parts = fullPath?.split('/') ?? [];

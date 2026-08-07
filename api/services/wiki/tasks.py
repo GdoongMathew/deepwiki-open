@@ -214,6 +214,7 @@ async def generate_repo_wiki(task: WikiTask) -> None:
     r = task.request
     try:
         repo = Repo(r.repo_url, r.type, access_token=r.token)
+        logger.info("Start generating %s wiki.", repr(repo))
 
         # Req 1.1: build the index only if it does not already exist.
         if not repo_index_exist(repo):

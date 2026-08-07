@@ -10,6 +10,7 @@ import WikiTreeView from '@/components/WikiTreeView';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { RepoInfo } from '@/types/repoinfo';
 import getRepoUrl from '@/utils/getRepoUrl';
+import { resolveRepoTypeFromDomain, isKnownProvider } from '@/utils/repoType';
 import {
   submitWikiTask,
   subscribeWikiTask,
@@ -125,13 +126,17 @@ export default function RepoWikiPage() {
       return '';
     }
   })();
-  const repoType = repoHost?.includes('bitbucket')
-    ? 'bitbucket'
-    : repoHost?.includes('gitlab')
-      ? 'gitlab'
-      : repoHost?.includes('github')
-        ? 'github'
-        : searchParams.get('type') || 'github';
+  // ③: trust the explicit `?type=` first (set by the landing form). Only when it
+  // is missing/unknown do we infer from the host — via the shared resolver, which
+  // honours configured on-prem hosts — defaulting to github for unknown hosts.
+  const repoTypeParam = searchParams.get('type') || '';
+  const repoType =
+    isKnownProvider(repoTypeParam) || repoTypeParam === 'local'
+      ? repoTypeParam
+      : (() => {
+          const resolved = resolveRepoTypeFromDomain(repoHost);
+          return resolved === 'web' ? 'github' : resolved;
+        })();
 
   // Import language context for translations
   const { messages } = useLanguage();
