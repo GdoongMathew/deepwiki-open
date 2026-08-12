@@ -35,87 +35,137 @@ def _exception_cleanup(func: Callable) -> Callable:
     return wrapper
 
 
+def _embed_gitlab_token(
+    remote_url: str,
+    access_token: str,
+) -> str:
+    parsed = urlparse(remote_url)
+    access_token = quote(access_token, safe="")
+
+    return urlunparse(
+        (
+            parsed.scheme,
+            f"oauth2:{access_token}@{parsed.netloc}",
+            parsed.path,
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _embed_github_token(
+    remote_url: str,
+    access_token: str,
+) -> str:
+    parsed = urlparse(remote_url)
+    return urlunparse(
+        (
+            parsed.scheme,
+            f"{access_token}@{parsed.netloc}",
+            parsed.path,
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _embed_bitbucket_token(
+    remote_url: str,
+    access_token: str,
+) -> str:
+    parsed = urlparse(remote_url)
+    # Bitbucket has two token formats with different auth schemes:
+    #   - HTTP access tokens (prefix "ATCTT") use x-bitbucket-api-token-auth
+    #   - App passwords (deprecated, EOL June 2026) use x-token-auth
+    # Detect by token prefix so existing app password users keep working.
+    auth_scheme = (
+        "x-bitbucket-api-token-auth"
+        if access_token.startswith("ATCTT")
+        else "x-token-auth"
+    )
+    access_token = quote(access_token, safe="")
+
+    return urlunparse(
+        (
+            parsed.scheme,
+            f"{auth_scheme}:{access_token}@{parsed.netloc}",
+            parsed.path,
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _get_remote_url_func(repo_type: str) -> Callable[[str, str], str] | None:
+    return {
+        "github": _embed_github_token,
+        "gitlab": _embed_gitlab_token,
+        "bitbucket": _embed_bitbucket_token,
+    }.get(repo_type, None)
+
+
 @_exception_cleanup
-def _clone_from_gitlab(
+def _clone_from_remote(
     remote_url: str,
     local_path: str,
+    repo_type: str,
     *,
     access_token: str | None = None,
     **kwargs,
 ) -> GitRepo:
     if access_token:
-        parsed = urlparse(remote_url)
-        access_token = quote(access_token, safe="")
-
-        remote_url = urlunparse(
-            (
-                parsed.scheme,
-                f"oauth2:{access_token}@{parsed.netloc}",
-                parsed.path,
-                "",
-                "",
-                "",
-            )
-        )
+        func = _get_remote_url_func(repo_type=repo_type)
+        if not func:
+            raise NotImplementedError(f"Unknown repo type: {repo_type}")
+        remote_url = func(remote_url, access_token)
     return GitRepo.clone_from(url=remote_url, to_path=local_path, **kwargs)
 
 
 @_exception_cleanup
-def _clone_from_github(
-    remote_url: str,
-    local_path: str,
+def _pull_latest(
+    repo: GitRepo,
+    branch_name: str,
+    repo_type: str,
     *,
     access_token: str | None = None,
-    **kwargs,
-) -> GitRepo:
+    remote_url: str | None = None,
+    origin: str = "origin",
+) -> bool:
+    """If a local clone's HEAD is different from origin/branch_name, pull the latest.
+
+    Parameters
+    ----------
+    repo: GitRepo
+        The repository to pull from.
+    branch_name: str
+        The branch to pull.
+    access_token: str
+    origin: str, default="origin"
+
+    Returns
+    -------
+    bool
+        True if the local clone was updated, False otherwise.
+    """
+    remote = repo.git.ls_remote(origin, branch_name)
+    if not remote.strip():
+        raise ValueError(f"Branch {branch_name} not found on remote origin")
+
+    remote_sha = remote.split()[0]
+
+    if repo.head.commit.hexsha == remote_sha:
+        return False
+
     if access_token:
-        parsed = urlparse(remote_url)
-
-        remote_url = urlunparse(
-            (
-                parsed.scheme,
-                f"{access_token}@{parsed.netloc}",
-                parsed.path,
-                "",
-                "",
-                "",
-            )
-        )
-    return GitRepo.clone_from(url=remote_url, to_path=local_path, **kwargs)
-
-
-@_exception_cleanup
-def _clone_from_bitbucket(
-    remote_url: str,
-    local_path: str,
-    *,
-    access_token: str | None = None,
-    **kwargs,
-) -> GitRepo:
-    if access_token:
-        parsed = urlparse(remote_url)
-        # Bitbucket has two token formats with different auth schemes:
-        #   - HTTP access tokens (prefix "ATCTT") use x-bitbucket-api-token-auth
-        #   - App passwords (deprecated, EOL June 2026) use x-token-auth
-        # Detect by token prefix so existing app password users keep working.
-        auth_scheme = (
-            "x-bitbucket-api-token-auth"
-            if access_token.startswith("ATCTT")
-            else "x-token-auth"
-        )
-        access_token = quote(access_token, safe="")
-
-        remote_url = urlunparse(
-            (
-                parsed.scheme,
-                f"{auth_scheme}:{access_token}@{parsed.netloc}",
-                parsed.path,
-                "",
-                "",
-                "",
-            )
-        )
-    return GitRepo.clone_from(url=remote_url, to_path=local_path, **kwargs)
+        if not remote_url:
+            raise ValueError("No remote url provided.")
+        new_url = _get_remote_url_func(repo_type=repo_type)(remote_url, access_token)
+        repo.remote(origin).set_url(new_url)
+    repo.remote("origin").pull(branch_name)
+    return True
 
 
 def _path_is_url(path: str) -> bool:
@@ -202,17 +252,7 @@ class Repo:
                 "multi_options": ["--depth=1", "--single-branch"],
             }
 
-            if self.repo_type == "github":
-                _clone_from_github(**kwargs)
-
-            elif self.repo_type == "gitlab":
-                _clone_from_gitlab(**kwargs)
-
-            elif self.repo_type == "bitbucket":
-                _clone_from_bitbucket(**kwargs)
-            else:
-                raise NotImplementedError(f"Unknown repo type: {self.repo_type}")
-
+            _clone_from_remote(repo_type=self.repo_type, **kwargs)
             logger.info("Repository %s cloned successfully", self.name)
 
     @property
@@ -227,3 +267,43 @@ class Repo:
 
     def __repr__(self) -> str:
         return f"{self.repo_type}: {self.name}"
+
+    def update(self) -> bool:
+        """Fetch the latest version of the repository."""
+        if self.is_local or not self.downloaded:
+            return False
+
+        if not GIT_OK:
+            raise RuntimeError("Missing `git` in current environment")
+
+        repo = GitRepo(path=self.save_path)
+        if repo.is_dirty():
+            logger.warning("Git tree is dirty, skipping updating repo %s", self.name)
+            return False
+
+        try:
+            branch_name = repo.active_branch.name
+        except (TypeError, ValueError):
+            logger.exception("Failed to get active branch for %s", self.name)
+            return False
+
+        logger.info("Trying to pull latest version of %s", self.name)
+        try:
+            updated = _pull_latest(
+                repo,
+                branch_name,
+                repo_type=self.repo_type,
+                access_token=self.access_token,
+                remote_url=self.repo_url,
+            )
+        except Exception:
+            logger.exception("Failed to pull latest version of %s", self.name)
+            return False
+
+        info = (
+            "Repository %s updated to latest."
+            if updated
+            else "Repository %s is already up to date."
+        )
+        logger.info(info, self.name)
+        return True
