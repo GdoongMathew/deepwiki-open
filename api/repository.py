@@ -150,6 +150,12 @@ def _pull_latest(
     bool
         True if the local clone was updated, False otherwise.
     """
+    if access_token:
+        if not remote_url:
+            raise ValueError("No remote url provided.")
+        new_url = _get_remote_url_func(repo_type=repo_type)(remote_url, access_token)
+        repo.remote(origin).set_url(new_url)
+
     remote = repo.git.ls_remote(origin, branch_name)
     if not remote.strip():
         raise ValueError(f"Branch {branch_name} not found on remote origin")
@@ -159,12 +165,7 @@ def _pull_latest(
     if repo.head.commit.hexsha == remote_sha:
         return False
 
-    if access_token:
-        if not remote_url:
-            raise ValueError("No remote url provided.")
-        new_url = _get_remote_url_func(repo_type=repo_type)(remote_url, access_token)
-        repo.remote(origin).set_url(new_url)
-    repo.remote("origin").pull(branch_name)
+    repo.remote(origin).pull(branch_name)
     return True
 
 
@@ -306,4 +307,4 @@ class Repo:
             else "Repository %s is already up to date."
         )
         logger.info(info, self.name)
-        return True
+        return updated
